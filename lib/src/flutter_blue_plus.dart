@@ -43,6 +43,10 @@ class FlutterBluePlus {
   /// Checks whether the device supports BLE Extended Advertising feature
   Future<bool> get isLeExtendedAdvertisingSupported =>
       _channel.invokeMethod('isLeExtendedAdvertisingSupported').then<bool>((d) => d);
+  
+  /// Return the maximum LE advertising data length in bytes
+  Future<int> get name =>
+      _channel.invokeMethod('getLeMaximumAdvertisingDataLength').then<int>((d) => d);
 
   /// Return the friendly Bluetooth name of the local Bluetooth adapter
   Future<String> get name =>
