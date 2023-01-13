@@ -223,6 +223,13 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
         result.success(mBluetoothAdapter != null);
         break;
       }
+        
+      
+      case "isLeExtendedAdvertisingSupported":
+      {
+        result.success(mBluetoothAdapter.isLeExtendedAdvertisingSupported());
+        break;
+      }
 
       case "isOn":
       {
