@@ -236,6 +236,15 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
         result.success(mBluetoothAdapter.isEnabled());
         break;
       }
+        
+      case "getLeMaximumAdvertisingDataLength":
+      {
+        int getLeMaximumAdvertisingDataLength = mBluetoothAdapter.getLeMaximumAdvertisingDataLength();
+        if (getLeMaximumAdvertisingDataLength == null)
+          getLeMaximumAdvertisingDataLength = 0;
+        result.success(getLeMaximumAdvertisingDataLength);
+        break;
+      }
 
       case "name":
       {
