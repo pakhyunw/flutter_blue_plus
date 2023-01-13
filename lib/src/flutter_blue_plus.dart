@@ -39,6 +39,10 @@ class FlutterBluePlus {
   /// Checks whether the device supports Bluetooth
   Future<bool> get isAvailable =>
       _channel.invokeMethod('isAvailable').then<bool>((d) => d);
+  
+  /// Checks whether the device supports BLE Extended Advertising feature
+  Future<bool> get isLeExtendedAdvertisingSupported =>
+      _channel.invokeMethod('isLeExtendedAdvertisingSupported').then<bool>((d) => d);
 
   /// Return the friendly Bluetooth name of the local Bluetooth adapter
   Future<String> get name =>
