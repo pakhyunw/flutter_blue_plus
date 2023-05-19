@@ -1,6 +1,6 @@
 #
 # To learn more about a Podspec see http://guides.cocoapods.org/syntax/podspec.html.
-# Run `pod lib lint flutter_blue_plus.podspec` to validate before publishing.
+# Run `pod lib lint flutter_blue_plus.podspec' to validate before publishing.
 #
 Pod::Spec.new do |s|
   s.name             = 'flutter_blue_plus'
@@ -15,8 +15,8 @@ Flutter plugin for connecting and communicationg with Bluetooth Low Energy devic
   s.source           = { :path => '.' }
   s.source_files = 'Classes/**/*', 'gen/**/*'
   s.public_header_files = 'Classes/**/*.h', 'gen/**/*.h'
-  s.dependency 'Flutter'
-  s.platform = :ios, '9.0'
+  s.dependency 'FlutterMacOS'
+  s.platform = :osx, '12.00'
   s.framework = 'CoreBluetooth'
 
   s.subspec "Protos" do |ss|
@@ -26,8 +26,8 @@ Flutter plugin for connecting and communicationg with Bluetooth Low Energy devic
     ss.dependency "Protobuf", '~> 3.21'
   end
 
-  # Flutter.framework does not contain a i386 slice.
-  # s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
-  s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) GPB_USE_PROTOBUF_FRAMEWORK_IMPORTS=1', }
-
+  s.pod_target_xcconfig = {
+    'DEFINES_MODULE' => 'YES',
+    'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) GPB_USE_PROTOBUF_FRAMEWORK_IMPORTS=1',
+  }
 end

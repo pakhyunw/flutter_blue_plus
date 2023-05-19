@@ -2,6 +2,8 @@
 // All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// ignore_for_file: avoid_print
+
 part of flutter_blue_plus;
 
 class FlutterBluePlus {
@@ -77,11 +79,14 @@ class FlutterBluePlus {
     return _channel.invokeMethod('turnOff').then<bool>((d) => d);
   }
 
-  final BehaviorSubject<bool> _isScanning = BehaviorSubject.seeded(false);
+  final BehaviorSubject<bool> _isScanning = BehaviorSubject(false);
+
   Stream<bool> get isScanning => _isScanning.stream;
 
+  bool get isScanningNow => _isScanning.latestValue;
+
   final BehaviorSubject<List<ScanResult>> _scanResults =
-      BehaviorSubject.seeded([]);
+      BehaviorSubject([]);
 
   /// Returns a stream that is a list of [ScanResult] results while a scan is in progress.
   ///
@@ -91,8 +96,6 @@ class FlutterBluePlus {
   /// One use for [scanResults] is as the stream in a StreamBuilder to display the
   /// results of a scan in real time while the scan is in progress.
   Stream<List<ScanResult>> get scanResults => _scanResults.stream;
-
-  final PublishSubject _stopScanPill = PublishSubject();
 
   /// Gets the current state of the Bluetooth module
   Stream<BluetoothState> get state async* {
@@ -128,6 +131,9 @@ class FlutterBluePlus {
         .then((p) => p.map((d) => BluetoothDevice.fromProto(d)).toList());
   }
 
+  // timeout for scanning that can be cancelled by stopScan
+  Timer? _scanTimeout;
+
   /// Starts a scan for Bluetooth Low Energy devices and returns a stream
   /// of the [ScanResult] results as they are received.
   ///
@@ -155,10 +161,11 @@ class FlutterBluePlus {
     // Emit to isScanning
     _isScanning.add(true);
 
-    final killStreams = <Stream>[];
-    killStreams.add(_stopScanPill);
     if (timeout != null) {
-      killStreams.add(Rx.timer(null, timeout));
+      _scanTimeout = Timer(timeout, () {
+        _isScanning.add(false);
+        _channel.invokeMethod('stopScan');
+      });
     }
 
     // Clear scan results list
@@ -167,10 +174,7 @@ class FlutterBluePlus {
     try {
       await _channel.invokeMethod('startScan', settings.writeToBuffer());
     } catch (e) {
-      if (kDebugMode) {
-        print('Error starting scan.');
-      }
-      _stopScanPill.add(null);
+      print('Error starting scan.');
       _isScanning.add(false);
       rethrow;
     }
@@ -178,14 +182,15 @@ class FlutterBluePlus {
     yield* FlutterBluePlus.instance._methodStream
         .where((m) => m.method == "ScanResult")
         .map((m) => m.arguments)
-        .takeUntil(Rx.merge(killStreams))
+        .takeWhile((element) => _isScanning.value)
         .doOnDone(stopScan)
         .map((buffer) => protos.ScanResult.fromBuffer(buffer))
         .map((p) {
       final result = ScanResult.fromProto(p);
-      final list = _scanResults.value;
-      int index = list.indexOf(result);
-      if (index != -1) {
+      List<ScanResult> list = List<ScanResult>.from(_scanResults.value);
+      if (list.contains(result)) {
+         // update advertising data
+         int index = list.indexOf(result);
         list[index] = result;
       } else {
         list.add(result);
@@ -225,7 +230,7 @@ class FlutterBluePlus {
   /// Stops a scan for Bluetooth Low Energy devices
   Future stopScan() async {
     await _channel.invokeMethod('stopScan');
-    _stopScanPill.add(null);
+    _scanTimeout?.cancel();
     _isScanning.add(false);
   }
 
