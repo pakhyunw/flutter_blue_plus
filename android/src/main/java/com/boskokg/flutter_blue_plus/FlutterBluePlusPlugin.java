@@ -394,9 +394,8 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
 
       case "pair":
       {
-        BluetoothReceiver myreceiver = new BluetoothReceiver();
-        var intentfilterparingrequest = new IntentFilter(BluetoothDevice.ActionPairingRequest);
-        RegisterReceiver(myreceiver, intentfilterparingrequest);
+        IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
+        getActivity().registerReceiver(mPairingRequestReceiver, filter);
 
 //        IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
 //        getActivity().registerReceiver(mPairingRequestReceiver, filter);
@@ -404,7 +403,7 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
         String deviceId = (String)call.arguments;
         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(deviceId);
 //        device.setPin(BLE_PIN.getBytes());
-//        device.createBond();
+        device.createBond();
         result.success(null);
         break;
       }
@@ -869,23 +868,27 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
     }
   }
 
-  public class BluetoothReceiver : BroadcastReceiver
-  {
-    public override void OnReceive(Context context, Intent intent)
-    {
-      string BLE_PIN = "123456";
-      var action = intent.Action;
-      switch (action)
-      {
-        case BluetoothDevice.ActionPairingRequest:
-          BluetoothDevice bluetoothDevice =
-                  (BluetoothDevice)intent.GetParcelableExtra(BluetoothDevice.ExtraDevice);
-          bluetoothDevice.SetPin(Encoding.ASCII.GetBytes(BLE_PIN));
-          bluetoothDevice.CreateBond();
-          break;
+  private final BroadcastReceiver mPairingRequestReceiver = new BroadcastReceiver() {
+    public void onReceive(Context context, Intent intent) {
+      String action = intent.getAction();
+      if (action.equals(BluetoothDevice.ACTION_PAIRING_REQUEST)) {
+        try {
+          BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+          int pin=intent.getIntExtra("android.bluetooth.device.extra.PAIRING_KEY", 123456);
+          //the pin in case you need to accept for an specific pin
+          Log.d(TAG, "Start Auto Pairing. PIN = " + intent.getIntExtra("android.bluetooth.device.extra.PAIRING_KEY",123456));
+          byte[] pinBytes;
+          pinBytes = (""+pin).getBytes("UTF-8");
+          device.setPin(pinBytes);
+          //setPairing confirmation if neeeded
+          device.setPairingConfirmation(true);
+        } catch (Exception e) {
+          Log.e(TAG, "Error occurs when trying to auto pair");
+          e.printStackTrace();
+        }
       }
     }
-  }
+  };
 
   private void ensurePermissionBeforeAction(String permission, OperationOnPermission operation) {
     if (permission != null &&
