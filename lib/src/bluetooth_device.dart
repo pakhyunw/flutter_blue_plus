@@ -67,6 +67,13 @@ class BluetoothDevice {
         .invokeMethod('pair', id.toString());
   }
 
+  /// Send a pairing request to the device. passKey
+  /// Currently only implemented on Android.
+  Future<void> pairWithoutPin(pin) async {
+    return FlutterBluePlus.instance._channel
+        .invokeMethod('pairWithoutPin', id.toString());
+  }
+
   /// Refresh Gatt Device Cache
   /// Emergency method to reload ble services & characteristics
   /// Currently only implemented on Android.
