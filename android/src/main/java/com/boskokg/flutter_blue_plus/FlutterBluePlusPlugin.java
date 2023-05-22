@@ -395,8 +395,7 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
       case "pair":
       {
         IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
-        getActivity().registerReceiver(mPairingRequestReceiver, filter);
-
+        activityBinding.getActivity().registerReceiver(mPairingRequestReceiver, filter);
 //        IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
 //        getActivity().registerReceiver(mPairingRequestReceiver, filter);
 //        String BLE_PIN = "123456";
