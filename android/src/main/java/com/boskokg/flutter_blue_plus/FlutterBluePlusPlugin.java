@@ -394,8 +394,10 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
 
       case "pair":
       {
+        String BLE_PIN = "123456";
         String deviceId = (String)call.arguments;
         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(deviceId);
+        device.setPin(BLE_PIN.getBytes());
         device.createBond();
         result.success(null);
         break;
