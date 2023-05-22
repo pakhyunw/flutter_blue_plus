@@ -396,13 +396,15 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
       {
         String BLE_PIN = "123456";
         String deviceId = (String)call.arguments;
+        var action = intent.Action;
         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(deviceId);
-        BluetoothDevice bluetoothDevice =
-                (BluetoothDevice)intent.GetParcelableExtra(device.ExtraDevice);
-        bluetoothDevice.setPin(BLE_PIN.getBytes());
-        bluetoothDevice.createBond();
-        result.success(null);
-        break;
+        if (action == BluetoothDevice.ActionPairingRequest) {
+          BluetoothDevice bluetoothDevice =
+                  (BluetoothDevice) intent.GetParcelableExtra(device.ExtraDevice);
+          bluetoothDevice.setPin(BLE_PIN.getBytes());
+          bluetoothDevice.createBond();
+          result.success(null);
+        }
       }
 
       case "clearGattCache":
