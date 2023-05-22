@@ -111,7 +111,10 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     }
     else if ([@"name" isEqualToString:call.method])
     {
-        result([[UIDevice currentDevice] name]);
+        // TODO support this via hostname? Returns UIDevice.current.name on iOS
+        result([FlutterError errorWithCode:@"name"
+                                   message:@"macOS does not support device name"
+                                   details:NULL]);
     }
     else if ([@"startScan" isEqualToString:call.method])
     {
@@ -176,7 +179,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
             [_centralManager connectPeripheral:peripheral options:nil];
             result(nil);
         }
-        @catch (NSException *e)
+        @catch (FlutterError *e)
         {
             result(e);
         }
@@ -190,7 +193,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
             [_centralManager cancelPeripheralConnection:peripheral];
             result(nil);
         }
-        @catch (NSException *e)
+        @catch (FlutterError *e)
         {
             result(e);
         }
@@ -203,7 +206,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
             CBPeripheral *peripheral = [self findPeripheral:remoteId];
             result([self toFlutterData:[self toDeviceStateProto:peripheral state:peripheral.state]]);
         }
-        @catch (NSException *e)
+        @catch (FlutterError *e)
         {
             result(e);
         }
@@ -220,7 +223,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
             [peripheral discoverServices:nil];
             result(nil);
         }
-        @catch (NSException *e)
+        @catch (FlutterError *e)
         {
             result(e);
         }
@@ -233,7 +236,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
             CBPeripheral *peripheral = [self findPeripheral:remoteId];
             result([self toFlutterData:[self toServicesResultProto:peripheral]]);
         }
-        @catch (NSException *e)
+        @catch (FlutterError *e)
         {
             result(e);
         }
@@ -259,7 +262,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
             [peripheral readValueForCharacteristic:characteristic];
             result(nil);
         }
-        @catch (NSException *e)
+        @catch (FlutterError *e)
         {
             result(e);
         }
@@ -285,7 +288,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
             [peripheral readValueForDescriptor:descriptor];
             result(nil);
         }
-        @catch (NSException *e)
+        @catch (FlutterError *e)
         {
             result(e);
         }
@@ -307,12 +310,8 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
                     ? CBCharacteristicWriteWithoutResponse
                     : CBCharacteristicWriteWithResponse;
 
-            if (type == CBCharacteristicWriteWithoutResponse && !peripheral.canSendWriteWithoutResponse) {
-                // canSendWriteWithoutResponse represents the current readiness of the peripheral to accept
-                // more write requests. If the peripheral isn't ready, we queue the request for later.
-                [_dataWaitingToWriteWithoutResponse setObject:request forKey:remoteId];
-                result(nil);
-            } else {
+            if (type == CBCharacteristicWriteWithResponse || peripheral.canSendWriteWithoutResponse)
+            {
                 // Find characteristic
                 CBCharacteristic *characteristic = [self locateCharacteristic:[request characteristicUuid]
                                                                    peripheral:peripheral
@@ -320,10 +319,22 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
                                                            secondaryServiceId:[request secondaryServiceUuid]];
                 // Write to characteristic
                 [peripheral writeValue:[request value] forCharacteristic:characteristic type:type];
-                result(@(YES));
+                if (type == CBCharacteristicWriteWithoutResponse)
+                {
+                    result(@(YES));
+                }
+                else
+                {
+                    result(nil);
+                }
+            }
+            else
+            { // writing without response and peripheral not ready
+                [_dataWaitingToWriteWithoutResponse setObject:request forKey:remoteId];
+                result(nil);
             }
         }
-        @catch (NSException *e)
+        @catch (FlutterError *e)
         {
             result(e);
         }
@@ -352,7 +363,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
             [peripheral writeValue:[request value] forDescriptor:descriptor];
             result(nil);
         }
-        @catch (NSException *e)
+        @catch (FlutterError *e)
         {
             result(e);
         }
@@ -378,7 +389,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
             [peripheral setNotifyValue:[request enable] forCharacteristic:characteristic];
             result(nil);
         }
-        @catch (NSException *e)
+        @catch (FlutterError *e)
         {
             result(e);
         }
@@ -392,7 +403,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
             uint32_t mtu = [self getMtu:peripheral];
             result([self toFlutterData:[self toMtuSizeResponseProto:peripheral mtu:mtu]]);
         }
-        @catch (NSException *e)
+        @catch (FlutterError *e)
         {
             result(e);
         }
@@ -400,7 +411,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     else if ([@"requestMtu" isEqualToString:call.method])
     {
         result([FlutterError errorWithCode:@"requestMtu"
-                                   message:@"iOS does not allow mtu requests to the peripheral"
+                                   message:@"macOS does not allow mtu requests to the peripheral"
                                    details:NULL]);
     }
     else if ([@"readRssi" isEqualToString:call.method])
@@ -412,7 +423,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
             [peripheral readRSSI];
             result(nil);
         }
-        @catch (NSException *e)
+        @catch (FlutterError *e)
         {
             result(e);
         }
@@ -420,19 +431,19 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     else if([@"requestConnectionPriority" isEqualToString:call.method])
     {
         result([FlutterError errorWithCode:@"requestConnectionPriority" 
-                                   message:@"iOS does not support connection priority requests"
+                                   message:@"macOS does not support connection priority requests"
                                    details:NULL]);
     }
     else if([@"setPreferredPhy" isEqualToString:call.method])
     {
         result([FlutterError errorWithCode:@"setPreferredPhy" 
-                                   message:@"iOS does not support set preferred phy requests"
+                                   message:@"macOS does not support set preferred phy requests"
                                    details:NULL]);
     }
     else if([@"removeBond" isEqualToString:call.method])
     {
         result([FlutterError errorWithCode:@"removeBond" 
-                                message:@"plugin does not support removeBond function on iOS"
+                                message:@"plugin does not support removeBond function on macOS"
                                 details:NULL]);
     }
     else

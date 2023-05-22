@@ -148,12 +148,20 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
       stateChannel.setStreamHandler(stateHandler);
       mBluetoothManager = (BluetoothManager) application.getSystemService(Context.BLUETOOTH_SERVICE);
       mBluetoothAdapter = mBluetoothManager.getAdapter();
+      IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
+      context.registerReceiver(mBluetoothStateReceiver, filter);
+      try {
+        stateHandler.setCachedBluetoothState(mBluetoothAdapter.getState());
+      } catch (SecurityException e) {
+        stateHandler.setCachedBluetoothStateUnauthorized();
+      }
     }
   }
 
   private void tearDown() {
     synchronized (tearDownLock) {
       Log.d(TAG, "teardown");
+      context.unregisterReceiver(mBluetoothStateReceiver);
       context = null;
       channel.setMethodCallHandler(null);
       channel = null;
@@ -276,8 +284,16 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
         ensurePermissionBeforeAction(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? Manifest.permission.BLUETOOTH_SCAN : Manifest.permission.ACCESS_FINE_LOCATION, (grantedScan, permissionScan) -> {
           if (grantedScan) {
             ensurePermissionBeforeAction(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? Manifest.permission.BLUETOOTH_CONNECT : null, (grantedConnect, permissionConnect) -> {
-              if (grantedConnect)
-                startScan(call, result);
+              if (grantedConnect) {
+                ensurePermissionBeforeAction(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? Manifest.permission.ACCESS_FINE_LOCATION : null, (grantedLocation, permissionLocation) -> {
+                  if (grantedLocation) {
+                    startScan(call, result);
+                  }
+                  else
+                    result.error(
+                            "no_permissions", String.format("flutter_blue plugin requires %s for scanning", permissionLocation), null);
+                });
+              }
               else
                 result.error(
                         "no_permissions", String.format("flutter_blue plugin requires %s for scanning", permissionConnect), null);
@@ -380,8 +396,10 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
 
       case "pair":
       {
+        String BLE_PIN = "123456";
         String deviceId = (String)call.arguments;
         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(deviceId);
+        device.setPin(BLE_PIN.getBytes());
         device.createBond();
         result.success(null);
         break;
@@ -408,7 +426,8 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
           Log.d("clearGattCache", "CLEAR GATT CACHE: " + hasCleared);
           result.success(null);
         } else {
-          result.error("clearGattCache", "no instance of BluetoothGatt, have you connected first?", null);
+          // no work to do 
+          result.success(null);
         }
 
         break;
@@ -748,6 +767,96 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
         break;
       }
 
+      case "requestConnectionPriority":
+      {
+        byte[] data = call.arguments();
+        Protos.ConnectionPriorityRequest request;
+
+        try {
+          request = Protos.ConnectionPriorityRequest.newBuilder().mergeFrom(data).build();
+        } catch (InvalidProtocolBufferException e) {
+          result.error("RuntimeException", e.getMessage(), e);
+          break;
+        }
+
+        BluetoothGatt gatt;
+
+        try {
+          gatt = locateGatt(request.getRemoteId());
+          int connectionPriority = request.getConnectionPriority();
+          if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+
+            boolean connectionPriorityDone = gatt.requestConnectionPriority(connectionPriority);
+            if(connectionPriorityDone) {
+              result.success(null);
+              break;
+            } else {
+              result.error("requestConnectionPriority", "gatt.requestConnectionPriority returned false", null);
+              break;
+            }
+           } else {
+            result.error("requestConnectionPriority", "Only supported on devices >= API 21 (Lollipop). This device == " + Build.VERSION.SDK_INT, null);
+            break;
+          }
+        } catch(Exception e) {
+          result.error("requestConnectionPriority", e.getMessage(), "jueputa" + e);
+          break;
+        }
+      }
+
+      case "setPreferredPhy":
+      {
+        byte[] data = call.arguments();
+        Protos.PreferredPhy request;
+
+        try {
+          request = Protos.PreferredPhy.newBuilder().mergeFrom(data).build();
+        } catch (InvalidProtocolBufferException e) {
+          result.error("RuntimeException", e.getMessage(), e);
+          break;
+        }
+
+        BluetoothGatt gatt;
+
+        try {
+          gatt = locateGatt(request.getRemoteId());
+          int txPhy = request.getTxPhy();
+          int rxPhy = request.getRxPhy();
+          int phyOptions = request.getPhyOptions();
+
+          if(Build.VERSION.SDK_INT >= 26) {
+            gatt.setPreferredPhy(txPhy, rxPhy, phyOptions);
+            result.success(null);
+            break;
+           } else {
+            result.error("setPreferredPhy", "Only supported on devices >= API 26. This device == " + Build.VERSION.SDK_INT, null);
+            break;
+          }
+        } catch(Exception e) {
+          result.error("setPreferredPhy", e.getMessage(), e);
+          break;
+        }
+      }
+
+      case "removeBond":
+      {
+        String deviceId = (String)call.arguments;
+        BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(deviceId);
+        if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
+          try {
+            Method removeBondMethod = device.getClass().getMethod("removeBond");
+            removeBondMethod.invoke(device);
+            result.success(true);
+          } catch (Exception e) {
+            result.error("removeBond", "Error removing bond: " + e.getMessage(), null);
+          }
+        } else {
+          result.success(false);
+        }
+
+        break;
+      }
+
       default:
       {
         result.notImplemented();
@@ -814,17 +923,19 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
     return descriptor;
   }
 
-  private final StreamHandler stateHandler = new StreamHandler() {
-    private EventSink sink;
+  private final BroadcastReceiver mBluetoothStateReceiver = new BroadcastReceiver() {
+    @Override
+    public void onReceive(Context context, Intent intent) {
+      final String action = intent.getAction();
 
-    private final BroadcastReceiver mReceiver = new BroadcastReceiver() {
-      @Override
-      public void onReceive(Context context, Intent intent) {
-        final String action = intent.getAction();
-
-        if (BluetoothAdapter.ACTION_STATE_CHANGED.equals(action)) {
-          final int state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE,
-                  BluetoothAdapter.ERROR);
+      if (BluetoothAdapter.ACTION_STATE_CHANGED.equals(action)) {
+        final int state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE,
+                BluetoothAdapter.ERROR);
+        EventSink sink = stateHandler.getSink();
+        if (sink == null) {
+          stateHandler.setCachedBluetoothState(state);
+        }
+        else {
           switch (state) {
             case BluetoothAdapter.STATE_OFF:
               sink.success(Protos.BluetoothState.newBuilder().setState(Protos.BluetoothState.State.OFF).build().toByteArray());
@@ -841,21 +952,64 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
           }
         }
       }
-    };
+    }
+  };
+
+  private class MyStreamHandler implements StreamHandler {
+    private final int STATE_UNAUTHORIZED = -1;
+
+    private EventSink sink;
+
+    public EventSink getSink() {
+      return sink;
+    }
+
+    private int cachedBluetoothState;
+
+    public void setCachedBluetoothState(int value) {
+      cachedBluetoothState = value;
+    }
+
+    public void setCachedBluetoothStateUnauthorized() {
+      cachedBluetoothState = STATE_UNAUTHORIZED;
+    }
 
     @Override
     public void onListen(Object o, EventChannel.EventSink eventSink) {
       sink = eventSink;
-      IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
-      context.registerReceiver(mReceiver, filter);
+      if (cachedBluetoothState != 0) {
+        Protos.BluetoothState.Builder p = Protos.BluetoothState.newBuilder();
+        switch (cachedBluetoothState) {
+          case BluetoothAdapter.STATE_OFF:
+            p.setState(Protos.BluetoothState.State.OFF);
+            break;
+          case BluetoothAdapter.STATE_ON:
+            p.setState(Protos.BluetoothState.State.ON);
+            break;
+          case BluetoothAdapter.STATE_TURNING_OFF:
+            p.setState(Protos.BluetoothState.State.TURNING_OFF);
+            break;
+          case BluetoothAdapter.STATE_TURNING_ON:
+            p.setState(Protos.BluetoothState.State.TURNING_ON);
+            break;
+          case STATE_UNAUTHORIZED:
+            p.setState(Protos.BluetoothState.State.UNAUTHORIZED);
+            break;
+          default:
+            p.setState(Protos.BluetoothState.State.UNKNOWN);
+            break;
+        }
+        sink.success(p.build().toByteArray());
+      }
     }
 
     @Override
     public void onCancel(Object o) {
       sink = null;
-      context.unregisterReceiver(mReceiver);
     }
   };
+
+  private final MyStreamHandler stateHandler = new MyStreamHandler();
 
   private void startScan(MethodCall call, Result result) {
     byte[] data = call.arguments();
@@ -945,18 +1099,18 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
 
     int macCount = proto.getMacAddressesCount();
     int serviceCount = proto.getServiceUuidsCount();
-    int count = macCount > 0 ? macCount : serviceCount;
+    int count = macCount + serviceCount;
     filters = new ArrayList<>(count);
 
-    for (int i = 0; i < count; i++) {
-      ScanFilter f;
-      if (macCount > 0) {
-        String macAddress = proto.getMacAddresses(i);
-        f = new ScanFilter.Builder().setDeviceAddress(macAddress).build();
-      } else {
-        String uuid = proto.getServiceUuids(i);
-        f = new ScanFilter.Builder().setServiceUuid(ParcelUuid.fromString(uuid)).build();
-      }
+    for (int i = 0; i < macCount; i++) {
+      String macAddress = proto.getMacAddresses(i);
+      ScanFilter f = new ScanFilter.Builder().setDeviceAddress(macAddress).build();
+      filters.add(f);
+    }
+
+    for (int i = 0; i < serviceCount; i++) {
+      String uuid = proto.getServiceUuids(i);
+      ScanFilter f = new ScanFilter.Builder().setServiceUuid(ParcelUuid.fromString(uuid)).build();
       filters.add(f);
     }
 
