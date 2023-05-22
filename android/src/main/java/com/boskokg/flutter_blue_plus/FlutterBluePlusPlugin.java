@@ -394,17 +394,19 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
 
       case "pair":
       {
-        String BLE_PIN = "123456";
+        BluetoothReceiver myreceiver = new BluetoothReceiver();
+        var intentfilterparingrequest = new IntentFilter(BluetoothDevice.ActionPairingRequest);
+        RegisterReceiver(myreceiver, intentfilterparingrequest);
+
+//        IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
+//        getActivity().registerReceiver(mPairingRequestReceiver, filter);
+//        String BLE_PIN = "123456";
         String deviceId = (String)call.arguments;
-        var action = intent.Action;
         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(deviceId);
-        if (action == BluetoothDevice.ActionPairingRequest) {
-          BluetoothDevice bluetoothDevice =
-                  (BluetoothDevice) intent.GetParcelableExtra(device.ExtraDevice);
-          bluetoothDevice.setPin(BLE_PIN.getBytes());
-          bluetoothDevice.createBond();
-          result.success(null);
-        }
+//        device.setPin(BLE_PIN.getBytes());
+//        device.createBond();
+        result.success(null);
+        break;
       }
 
       case "clearGattCache":
@@ -863,6 +865,24 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
       {
         result.notImplemented();
         break;
+      }
+    }
+  }
+
+  public class BluetoothReceiver : BroadcastReceiver
+  {
+    public override void OnReceive(Context context, Intent intent)
+    {
+      string BLE_PIN = "123456";
+      var action = intent.Action;
+      switch (action)
+      {
+        case BluetoothDevice.ActionPairingRequest:
+          BluetoothDevice bluetoothDevice =
+                  (BluetoothDevice)intent.GetParcelableExtra(BluetoothDevice.ExtraDevice);
+          bluetoothDevice.SetPin(Encoding.ASCII.GetBytes(BLE_PIN));
+          bluetoothDevice.CreateBond();
+          break;
       }
     }
   }
