@@ -248,8 +248,6 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
       case "getLeMaximumAdvertisingDataLength":
       {
         int getLeMaximumAdvertisingDataLength = mBluetoothAdapter.getLeMaximumAdvertisingDataLength();
-        if (getLeMaximumAdvertisingDataLength == null)
-          getLeMaximumAdvertisingDataLength = 0;
         result.success(getLeMaximumAdvertisingDataLength);
         break;
       }
