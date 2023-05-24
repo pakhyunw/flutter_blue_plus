@@ -214,7 +214,7 @@ class BluetoothCharacteristic {
     // wait for response, so that we can check for success
     protos.SetNotificationResponse response = await futureResponse;
     if (!response.success) {
-      throw Exception('setNotifyValue failed');
+      // throw Exception('setNotifyValue failed');
     }
 
     BluetoothCharacteristic c = BluetoothCharacteristic.fromProto(response.characteristic);

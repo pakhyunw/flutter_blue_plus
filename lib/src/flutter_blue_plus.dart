@@ -85,6 +85,7 @@ class FlutterBluePlus {
 
   bool get isScanningNow => _isScanning.latestValue;
 
+
   final BehaviorSubject<List<ScanResult>> _scanResults =
       BehaviorSubject([]);
 
@@ -147,6 +148,8 @@ class FlutterBluePlus {
     List<String> macAddresses = const [],
     Duration? timeout,
     bool allowDuplicates = false,
+    Function? onDone
+
   }) async* {
     var settings = protos.ScanSettings.create()
       ..androidScanMode = scanMode.value
@@ -165,6 +168,7 @@ class FlutterBluePlus {
       _scanTimeout = Timer(timeout, () {
         _isScanning.add(false);
         _channel.invokeMethod('stopScan');
+        onDone;
       });
     }
 
