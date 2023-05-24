@@ -403,7 +403,7 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
 
       case "pairWithoutPin":
       {
-        String deviceId = (String)call.arguments[0];
+        String deviceId = (String)call.arguments;
         IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
         activityBinding.getActivity().registerReceiver(mPairingRequestReceiver, filter);
         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(deviceId);
