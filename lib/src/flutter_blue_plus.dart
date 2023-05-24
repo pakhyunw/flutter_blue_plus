@@ -166,7 +166,7 @@ class FlutterBluePlus {
 
     if (timeout != null) {
       _scanTimeout = Timer(timeout, () {
-        onDone;
+        if(onDone != null) onDone();
         _isScanning.add(false);
         _channel.invokeMethod('stopScan');
       });
