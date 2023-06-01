@@ -60,7 +60,7 @@ class BluetoothDevice {
     }
   }
 
-  Future<void> close() async {
+  close() async {
     return FlutterBluePlus.instance._channel
         .invokeMethod('close', id.toString());
   }
