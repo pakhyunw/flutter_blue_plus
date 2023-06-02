@@ -396,9 +396,11 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
       {
         String deviceId = (String)call.arguments;
         BluetoothDeviceCache cache = mDevices.remove(deviceId);
-        BluetoothGatt gattServer = cache.gatt;
-        gattServer.disconnect();
-        gattServer.close();
+        if(cache != null) {
+          BluetoothGatt gattServer = cache.gatt;
+          gattServer.disconnect();
+          gattServer.close();
+        }
         break;
       }
 
