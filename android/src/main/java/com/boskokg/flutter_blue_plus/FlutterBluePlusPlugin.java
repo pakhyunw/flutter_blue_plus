@@ -400,7 +400,6 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
           BluetoothGatt gattServer = cache.gatt;
           gattServer.disconnect();
           gattServer.close();
-          gattServer.clear();
         }
         break;
       }
