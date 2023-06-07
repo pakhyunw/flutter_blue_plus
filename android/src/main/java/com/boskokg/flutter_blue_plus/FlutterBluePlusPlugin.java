@@ -1071,6 +1071,7 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
   }
 
   private void stopScan() {
+    mBluetoothAdapter.cancelDiscovery();
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
       stopScan21();
     } else {
