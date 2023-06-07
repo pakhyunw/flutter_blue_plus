@@ -370,15 +370,13 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
 
           // If device was connected to previously but is now disconnected, attempt a reconnect
           BluetoothDeviceCache bluetoothDeviceCache = mDevices.get(deviceId);
-          while (!isConnected) {
-            if(bluetoothDeviceCache != null){
-              bluetoothDeviceCache.gatt.close();
-            }
+          if(bluetoothDeviceCache != null && !isConnected) {
             if(bluetoothDeviceCache.gatt.connect()){
               result.success(null);
-              return;
+            } else {
+              result.error("reconnect_error", "error when reconnecting to device", null);
             }
-            isConnected = mBluetoothManager.getConnectedDevices(BluetoothProfile.GATT).contains(device);
+            return;
           }
 
           // New request, connect and add gattServer to Map
