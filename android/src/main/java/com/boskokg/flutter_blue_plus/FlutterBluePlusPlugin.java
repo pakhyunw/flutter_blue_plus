@@ -263,17 +263,19 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
 
       case "turnOn":
       {
-        if (!mBluetoothAdapter.isEnabled()) {
-          result.success(mBluetoothAdapter.enable());
-        }
+        mBluetoothAdapter.enable();
+//        if (!mBluetoothAdapter.isEnabled()) {
+//          result.success(mBluetoothAdapter.enable());
+//        }
         break;
       }
 
       case "turnOff":
       {
-        if (mBluetoothAdapter.isEnabled()) {
-          result.success(mBluetoothAdapter.disable());
-        }
+        mBluetoothAdapter.disable();
+//        if (mBluetoothAdapter.isEnabled()) {
+//          result.success(mBluetoothAdapter.disable());
+//        }
         break;
       }
 
