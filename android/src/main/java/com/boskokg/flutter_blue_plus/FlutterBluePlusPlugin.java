@@ -388,7 +388,7 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
 
             case "pair": {
                 String deviceId = (String) call.arguments;
-                IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
+                BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(deviceId);
                 device.createBond();
                 result.success(null);
                 break;
