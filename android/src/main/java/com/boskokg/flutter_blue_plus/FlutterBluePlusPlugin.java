@@ -359,6 +359,8 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
             return;
           }
           String deviceId = options.getRemoteId();
+          IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
+          activityBinding.getActivity().registerReceiver(mPairingRequestReceiverNotKey, filter);
           BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(deviceId);
           boolean isConnected = mBluetoothManager.getConnectedDevices(BluetoothProfile.GATT).contains(device);
 
