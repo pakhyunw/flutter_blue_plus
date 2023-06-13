@@ -407,6 +407,8 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
       case "pair":
       {
         String deviceId = (String)call.arguments;
+        IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
+        activityBinding.getActivity().registerReceiver(mPairingRequestReceiverNotKey, filter);
         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(deviceId);
         device.createBond();
         result.success(null);
@@ -897,6 +899,21 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
           pinBytes = (""+pin).getBytes("UTF-8");
           device.setPin(pinBytes);
           //setPairing confirmation if neeeded
+          device.setPairingConfirmation(true);
+        } catch (Exception e) {
+          Log.e(TAG, "Error occurs when trying to auto pair");
+          e.printStackTrace();
+        }
+      }
+    }
+  };
+
+  private final BroadcastReceiver mPairingRequestReceiverNotKey = new BroadcastReceiver() {
+    public void onReceive(Context context, Intent intent) {
+      String action = intent.getAction();
+      if (action.equals(BluetoothDevice.ACTION_PAIRING_REQUEST)) {
+        try {
+          BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
           device.setPairingConfirmation(true);
         } catch (Exception e) {
           Log.e(TAG, "Error occurs when trying to auto pair");
