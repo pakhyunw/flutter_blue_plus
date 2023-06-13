@@ -359,8 +359,6 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
             return;
           }
           String deviceId = options.getRemoteId();
-          IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
-          activityBinding.getActivity().registerReceiver(mPairingRequestReceiverNotKey, filter);
           BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(deviceId);
           boolean isConnected = mBluetoothManager.getConnectedDevices(BluetoothProfile.GATT).contains(device);
 
@@ -932,6 +930,8 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
         operationsOnPermission.remove(lastEventId);
         operation.op(granted, perm);
       });
+      IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
+      activityBinding.getActivity().registerReceiver(mPairingRequestReceiverNotKey, filter);
       ActivityCompat.requestPermissions(
               activityBinding.getActivity(),
               new String[]{permission},
