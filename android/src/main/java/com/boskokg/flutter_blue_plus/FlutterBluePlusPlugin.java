@@ -344,6 +344,8 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
 
       case "connect":
       {
+        IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
+        activityBinding.getActivity().registerReceiver(mPairingRequestReceiverNotKey, filter);
         ensurePermissionBeforeAction(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? Manifest.permission.BLUETOOTH_CONNECT : null, (granted, permission) -> {
           if (!granted) {
             result.error(
@@ -930,8 +932,6 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
         operationsOnPermission.remove(lastEventId);
         operation.op(granted, perm);
       });
-      IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
-      activityBinding.getActivity().registerReceiver(mPairingRequestReceiverNotKey, filter);
       ActivityCompat.requestPermissions(
               activityBinding.getActivity(),
               new String[]{permission},
