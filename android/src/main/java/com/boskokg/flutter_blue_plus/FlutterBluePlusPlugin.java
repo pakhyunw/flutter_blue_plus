@@ -379,7 +379,7 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
             case "close": {
                 String deviceId = (String) call.arguments;
                 BluetoothDeviceCache bluetoothDeviceCache = mDevices.get(deviceId);
-                if(bluetoothDeviceCache!=null){
+                if (bluetoothDeviceCache != null) {
                     BluetoothGatt gattServer = bluetoothDeviceCache.gatt;
                     gattServer.disconnect();
                     gattServer.close();
@@ -435,12 +435,15 @@ public class FlutterBluePlusPlugin implements FlutterPlugin, MethodCallHandler, 
 
             case "disconnect": {
                 String deviceId = (String) call.arguments;
-                BluetoothDeviceCache bluetoothDeviceCache = mDevices.get(deviceId);
-                if(bluetoothDeviceCache!=null){
-                    BluetoothGatt gattServer = bluetoothDeviceCache.gatt;
+                BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(deviceId);
+                BluetoothDeviceCache cache = mDevices.remove(deviceId);
+                if (cache != null) {
+                    BluetoothGatt gattServer = cache.gatt;
                     gattServer.disconnect();
-                    gattServer.close();
-                    mDevices.remove(deviceId);
+                    int state = mBluetoothManager.getConnectionState(device, BluetoothProfile.GATT);
+                    if (state == BluetoothProfile.STATE_DISCONNECTED) {
+                        gattServer.close();
+                    }
                 }
                 result.success(null);
                 break;
