@@ -123,6 +123,9 @@ class AdvertisementParser {
             data.get(msd);
             ret.putManufacturerData(manufacturerId, ByteString.copyFrom(msd));
           }
+          if(length == 2){
+            ret.putManufacturerData(manufacturerId+1, ByteString.copyFrom(data));
+          }
           break;
         }
         default: {
