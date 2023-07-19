@@ -51,7 +51,6 @@ class AdvertisementParser {
     ByteBuffer data = ByteBuffer.wrap(rawData).asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
     AdvertisementData.Builder ret = AdvertisementData.newBuilder();
     boolean seenLongLocalName = false;
-    log.p
     do {
       int length = data.get() & 0xFF;
       if (length == 0) {
