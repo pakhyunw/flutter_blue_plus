@@ -124,7 +124,7 @@ class AdvertisementParser {
           if((length - 2) > 0) {
             byte[] msd = new byte[length - 2];
             data.get(msd);
-            ret.putManufacturerData(manufacturerId, ByteString.copyFrom(msd));
+//            ret.putManufacturerData(manufacturerId, ByteString.copyFrom(msd));
           }
           break;
         }
