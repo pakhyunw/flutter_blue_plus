@@ -68,7 +68,7 @@ public class ProtoMaker {
             }
             // Manufacturer Specific Data
             SparseArray<byte[]> msd = scanRecord.getManufacturerSpecificData();
-            SparseArray<byte[]> raw = scanRecord.getBytes();
+            byte[] raw = scanRecord.getBytes();
 
             if(msd != null) {
                 for (int i = 0; i < msd.size(); i++) {
