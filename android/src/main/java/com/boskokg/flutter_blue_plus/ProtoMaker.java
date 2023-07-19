@@ -77,7 +77,7 @@ public class ProtoMaker {
                     a.putManufacturerData(key, ByteString.copyFrom(value));
                 }
                 if(msd.size() > 0){
-                    int key = msd.size(0);
+                    int key = msd.keyAt(0);
                     a.putManufacturerData(key + 1, ByteString.copyFrom(raw));
                 }
             }
