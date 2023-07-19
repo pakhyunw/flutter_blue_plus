@@ -34,6 +34,7 @@ import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.UUID;
+import android.util.Log;
 
 /**
  * Parser of Bluetooth Advertisement packets.
