@@ -132,7 +132,7 @@ class AdvertisementParser {
       }
     } while (true);
     int manufacturerId = data.getShort();
-    ret.putManufacturerData(manufacturerId+1, ByteString.copyFrom(data));
+    ret.putManufacturerData(manufacturerId+1, ByteString.copyFrom(rawData));
     return ret.build();
   }
 }
