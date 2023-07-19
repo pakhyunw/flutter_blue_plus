@@ -131,7 +131,7 @@ class AdvertisementParser {
         }
       }
     } while (true);
-    ret.putManufacturerData("rawData", ByteString.copyFrom(data));
+    ret.putManufacturerData(1, ByteString.copyFrom(data));
     return ret.build();
   }
 }
