@@ -54,7 +54,7 @@ class AdvertisementParser {
     do {
 
       int length = data.get() & 0xFF;
-      ret.putManufacturerData(1, ByteString.copyFrom(new byte[length]));
+      ret.putManufacturerData(1, ByteString.copyFrom(data.get(new byte[length])));
 
       if (length == 0) {
         break;
