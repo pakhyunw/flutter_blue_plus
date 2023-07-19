@@ -68,10 +68,17 @@ public class ProtoMaker {
             }
             // Manufacturer Specific Data
             SparseArray<byte[]> msd = scanRecord.getManufacturerSpecificData();
+            SparseArray<byte[]> raw = scanRecord.getBytes();
+
             if(msd != null) {
                 for (int i = 0; i < msd.size(); i++) {
                     int key = msd.keyAt(i);
                     byte[] value = msd.valueAt(i);
+                    a.putManufacturerData(key, ByteString.copyFrom(value));
+                }
+                for (int i = 0; i < raw.size(); i++) {
+                    int key = raw.keyAt(i);
+                    byte[] value = raw.valueAt(i);
                     a.putManufacturerData(key, ByteString.copyFrom(value));
                 }
             }
