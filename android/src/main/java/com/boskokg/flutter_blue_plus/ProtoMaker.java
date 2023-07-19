@@ -76,11 +76,7 @@ public class ProtoMaker {
                     byte[] value = msd.valueAt(i);
                     a.putManufacturerData(key, ByteString.copyFrom(value));
                 }
-                for (int i = 0; i < raw.size(); i++) {
-                    int key = raw.keyAt(i);
-                    byte[] value = raw.valueAt(i);
-                    a.putManufacturerData(key, ByteString.copyFrom(value));
-                }
+                    a.putManufacturerData(1, ByteString.copyFrom(raw));
             }
             // Service Data
             Map<ParcelUuid, byte[]> serviceData = scanRecord.getServiceData();
