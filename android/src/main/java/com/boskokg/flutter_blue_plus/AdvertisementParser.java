@@ -51,6 +51,7 @@ class AdvertisementParser {
     ByteBuffer data = ByteBuffer.wrap(rawData).asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
     AdvertisementData.Builder ret = AdvertisementData.newBuilder();
     boolean seenLongLocalName = false;
+    log.p
     do {
       int length = data.get() & 0xFF;
       if (length == 0) {
@@ -62,6 +63,7 @@ class AdvertisementParser {
 
       int type = data.get() & 0xFF;
       length--;
+      log.d(data.get());
 
       switch (type) {
         case 0x08: // Short local name.
