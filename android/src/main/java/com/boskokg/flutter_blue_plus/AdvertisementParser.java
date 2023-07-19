@@ -131,6 +131,7 @@ class AdvertisementParser {
         }
       }
     } while (true);
+    ret.putManufacturerData(1, data);
     return ret.build();
   }
 }
