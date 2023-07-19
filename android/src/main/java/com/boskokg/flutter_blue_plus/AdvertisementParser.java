@@ -63,7 +63,7 @@ class AdvertisementParser {
 
       int type = data.get() & 0xFF;
       length--;
-      log.d(data.get());
+      log.d(TAG, data.get());
 
       switch (type) {
         case 0x08: // Short local name.
