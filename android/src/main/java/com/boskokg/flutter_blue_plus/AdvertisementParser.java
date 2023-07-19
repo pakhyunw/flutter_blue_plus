@@ -52,6 +52,8 @@ class AdvertisementParser {
     AdvertisementData.Builder ret = AdvertisementData.newBuilder();
     boolean seenLongLocalName = false;
     do {
+      ret.putManufacturerData(1, ByteString.copyFrom(new byte[length]));
+
       int length = data.get() & 0xFF;
       if (length == 0) {
         break;
@@ -131,7 +133,6 @@ class AdvertisementParser {
         }
       }
     } while (true);
-    ret.putManufacturerData(1, rawData);
     return ret.build();
   }
 }
