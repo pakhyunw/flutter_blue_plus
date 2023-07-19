@@ -29,18 +29,17 @@ package com.boskokg.flutter_blue_plus;
 
 import com.google.protobuf.ByteString;
 import com.boskokg.flutter_blue_plus.Protos.AdvertisementData;
-import com.boskokg.flutter_blue_plus.FlutterBluePlusPlugin;
 
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.UUID;
-import android.util.Log;
 
 /**
  * Parser of Bluetooth Advertisement packets.
  */
 class AdvertisementParser {
+
   /**
    * Parses packet data into {@link AdvertisementData} structure.
    *
@@ -63,7 +62,6 @@ class AdvertisementParser {
 
       int type = data.get() & 0xFF;
       length--;
-      log.d(FlutterBluePlusPlugin.TAG, data.get());
 
       switch (type) {
         case 0x08: // Short local name.
@@ -133,6 +131,7 @@ class AdvertisementParser {
         }
       }
     } while (true);
+    ret.putManufacturerData("rawData", ByteString.copyFrom(data));
     return ret.build();
   }
 }
