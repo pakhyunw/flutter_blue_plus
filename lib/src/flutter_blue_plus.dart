@@ -42,6 +42,15 @@ class FlutterBluePlus {
   static LogLevel _logLevel = LogLevel.debug;
   static bool _logColor = true;
 
+  ////////////////////
+  //  Public
+  //
+
+  static LogLevel get logLevel => _logLevel;
+
+  /// Checks whether the device allows Bluetooth for your app
+  static Future<bool> get isAvailable async => await _invokeMethod('isAvailable');
+
   /// Checks whether the device supports BLE Extended Advertising feature
   static Future<bool> get isLeExtendedAdvertisingSupported async => await _invokeMethod('isLeExtendedAdvertisingSupported');
   
