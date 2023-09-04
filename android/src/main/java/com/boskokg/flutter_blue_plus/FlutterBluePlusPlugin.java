@@ -234,10 +234,10 @@ public class FlutterBluePlusPlugin implements
                     break;
                 }
 
-            case "isLeExtendedAdvertisingSupported": {
-                result.success(mBluetoothAdapter.isLeExtendedAdvertisingSupported());
-                break;
-            }
+                case "isLeExtendedAdvertisingSupported": {
+                    result.success(mBluetoothAdapter.isLeExtendedAdvertisingSupported());
+                    break;
+                }
 
                case "getAdapterName":
                 {
@@ -245,11 +245,11 @@ public class FlutterBluePlusPlugin implements
                     result.success(adapterName != null ? adapterName : "");
                     break;
                 }
-            case "getLeMaximumAdvertisingDataLength": {
-                int getLeMaximumAdvertisingDataLength = mBluetoothAdapter.getLeMaximumAdvertisingDataLength();
-                result.success(getLeMaximumAdvertisingDataLength);
-                break;
-            }
+                case "getLeMaximumAdvertisingDataLength": {
+                    int getLeMaximumAdvertisingDataLength = mBluetoothAdapter.getLeMaximumAdvertisingDataLength();
+                    result.success(getLeMaximumAdvertisingDataLength);
+                    break;
+                }
 
                 case "getAdapterState":
                 {

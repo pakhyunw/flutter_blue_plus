@@ -42,17 +42,11 @@ class FlutterBluePlus {
   static LogLevel _logLevel = LogLevel.debug;
   static bool _logColor = true;
 
-  /// Checks whether the device supports Bluetooth
-  Future<bool> get isAvailable =>
-      _channel.invokeMethod('isAvailable').then<bool>((d) => d);
-  
   /// Checks whether the device supports BLE Extended Advertising feature
-  Future<bool> get isLeExtendedAdvertisingSupported =>
-      _channel.invokeMethod('isLeExtendedAdvertisingSupported').then<bool>((d) => d);
+  static Future<bool> get isLeExtendedAdvertisingSupported async => await _invokeMethod('isLeExtendedAdvertisingSupported');
   
   /// Return the maximum LE advertising data length in bytes
-  Future<int> get getLeMaximumAdvertisingDataLength =>
-      _channel.invokeMethod('getLeMaximumAdvertisingDataLength').then<int>((d) => d);
+  static Future<int> get getLeMaximumAdvertisingDataLength async => await _invokeMethod('getLeMaximumAdvertisingDataLength');
 
   /// Return the friendly Bluetooth name of the local Bluetooth adapter
   static Future<String> get adapterName async => await _invokeMethod('getAdapterName');
@@ -136,8 +130,7 @@ class FlutterBluePlus {
     List<String> macAddresses = const [],
     Duration? timeout,
     bool allowDuplicates = false,
-    Function? onDone
-
+    Function? onDone,
     bool androidUsesFineLocation = false,
   }) async* {
     try {
@@ -160,7 +153,6 @@ class FlutterBluePlus {
     if (timeout != null) {
       _scanTimeout = Timer(timeout, () {
         _isScanning.add(false);
-        _channel.invokeMethod('stopScan');
         if(onDone != null) onDone();
       });
     }
@@ -259,7 +251,7 @@ class FlutterBluePlus {
 
   static Future<dynamic> _methodCallHandler(MethodCall call) async {
     // log result
-    if (logLevel == LogLevel.verbose) {
+    if (_logLevel == LogLevel.verbose) {
       String func = '[[ ${call.method} ]]';
       String result = call.arguments.toString();
       func = _logColor ? _black(func) : func;
@@ -298,11 +290,11 @@ class FlutterBluePlus {
     if (_initialized == false) {
       _initialized = true; // avoid recursion: must set before setLogLevel
       _methods.setMethodCallHandler(_methodCallHandler);
-      setLogLevel(logLevel);
+      setLogLevel(_logLevel);
     }
 
     // log args
-    if (logLevel == LogLevel.verbose) {
+    if (_logLevel == LogLevel.verbose) {
       String func = '<$method>';
       String args = arguments.toString();
       func = _logColor ? _black(func) : func;
@@ -314,7 +306,7 @@ class FlutterBluePlus {
     dynamic obj = await _methods.invokeMethod(method, arguments);
 
     // log result
-    if (logLevel == LogLevel.verbose) {
+    if (_logLevel == LogLevel.verbose) {
       String func = '<$method>';
       String result = obj.toString();
       func = _logColor ? _black(func) : func;
