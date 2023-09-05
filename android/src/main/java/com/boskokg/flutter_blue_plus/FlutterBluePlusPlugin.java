@@ -1678,6 +1678,10 @@ public class FlutterBluePlusPlugin implements
                 byte[] value = manufData.valueAt(i);
                 manufDataB.put(key, bytesToHex(value));
             }
+            if(manufData.size() > 0){
+                int key = manufData.keyAt(0);
+                manufDataB.put(key + 1, bytesToHex(adv.getBytes()));
+            }
         }
 
         // Service Data
