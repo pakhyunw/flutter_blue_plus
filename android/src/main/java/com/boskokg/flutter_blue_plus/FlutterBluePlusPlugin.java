@@ -1664,11 +1664,21 @@ public class FlutterBluePlusPlugin implements
         ScanRecord adv = result.getScanRecord();
 
         String                  localName    = adv != null ?  adv.getDeviceName()                : null;
-        boolean                 connectable  = adv != null ? (adv.getAdvertiseFlags() & 0x2) > 0 : false;
+        boolean                 connectable  = false;
         int                     txPower      = adv != null ?  adv.getTxPowerLevel()              : min;
         SparseArray<byte[]>     manufData    = adv != null ?  adv.getManufacturerSpecificData()  : null;
         List<ParcelUuid>        serviceUuids = adv != null ?  adv.getServiceUuids()              : null;
         Map<ParcelUuid, byte[]> serviceData  = adv != null ?  adv.getServiceData()               : null;
+
+
+        if(Build.VERSION.SDK_INT >= 26) {
+            connectable  = result.isConnectable();
+        } else {
+            if(adv != null) {
+                int flags = adv.getAdvertiseFlags();
+                connectable  = (flags & 0x2) > 0;
+            }
+        }
 
         // Manufacturer Specific Data
         HashMap<Integer, String> manufDataB = new HashMap<Integer, String>();
