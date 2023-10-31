@@ -1,3 +1,241 @@
+## 1.20.7
+* **[Fix]**  events API was not accessible through `FlutterBluePlus.events`
+
+## 1.20.6
+* **[Add]** `FlutterBluePlus.events.mtu`
+
+## 1.20.5
+* **[Add]** `FlutterBluePlus.events.onNameChanged`
+* **[Add]** `FlutterBluePlus.events.onServicesChanged`
+
+## 1.20.4
+* **[Rename]** `FlutterBluePlus.connectionEvents` -> `FlutterBluePlus.events.connectionState`
+* **[Add]** `FlutterBluePlus.events.onCharacteristicReceived`
+* **[Add]** `FlutterBluePlus.events.onDescriptorRead`
+* **[Add]** `FlutterBluePlus.events.bondState`
+
+## 1.20.3
+* **[Add]** `FlutterBluePlus.connectionEvents`, a stream of all connection & disconnected events
+* **[Add]** `FlutterBluePlus.connectedDevices`, to get currently connected devices
+* **[Add]** `device.isConnected`, convenience accessor
+
+## 1.20.2
+* **[Fix]** cannot retrieve platform name from bondedDevices
+* **[Fix]** stopScan: should clear results *after* platform method has been called
+
+## 1.20.1
+* **[Remove]** `FlutterBluePlus.connectedDevices`. This API needs more thought.
+
+## 1.20.0
+This release renames `connectedSystemDevices`.
+* **[Rename]** `connectedSystemDevices` -> `systemDevices`, because they must be re-connected by *your* app
+
+## 1.19.2
+* **[Add]** new method `device.cancelWhenDisconnected(subscription)`
+
+## 1.19.1
+* **[Add]** new method `FlutterBluePlus.connectedDevices`
+
+## 1.19.0
+This release reverts most of the breaking changes made in 1.18.0.
+* **[Revert]** most breaking changes made to bondState stream in 1.18.0
+* **[Unchanged]** bond lost/failed are replaced by prevBondState
+* **[Add]** method device.prevBondState
+* **[Fix]** android: adapterName must request permission
+
+## 1.18.3
+* **[Refactor]** bondState: finish refactor started in 1.18.0
+
+## 1.18.2
+* **[Fix]** bondState: must *explicitly* check for null prevState (regression 1.18.0)
+
+## 1.18.1
+* **[Fix]** bondState: handle null prevState (regression 1.18.0)
+
+## 1.18.0
+This release improves `bondState` stream
+* **[Breaking Change]** bondState: directly expose prevBond instead of lost/failed flags
+
+## 1.17.6
+* **[Fix]** scanResults: clear scan results on stopScan (regression 1.16.8)
+
+## 1.17.5
+* **[Example]** accidentally left performanceOverlay enabled (regression 1.17.4)
+
+## 1.17.4
+* **[Example]** remove PermissionHandler dependency. It is no longer needed.
+* **[Example]** ScanScreen: use ListView instead of SingleChildScrollView
+
+## 1.17.3
+* **[Fix]** android: turnOn throws exception if permission denied
+
+## 1.17.2
+This bug affected mtu, lastValueStream, adapterState, & bondState.
+* **[Fix]** newStreamWithInitialValue was not emitting initial value. (regression 1.16.6)
+
+## 1.17.1
+* **[Fix]** timeout when connect is called when adapter is off
+* **[Fix]** android: was not calling disconnect callback when adapter turned off
+* **[Fix]** android: connectable flag was not working (regression 1.7.0)
+* **[Improve]** do not re-get adapterState when we already have it
+
+## 1.17.0
+This release improves `lastValue` & `lastValueStream`.
+* **[Breaking Change/Fix]** should update `lastValue` & `lastValueStream` when `write()` is called
+* **[Feature]** Android: support `onNameChanged` & `onServicesChanged` characteristics
+* **[Fix]** iOS: `discoverServices` crash [_NSInlineData intValue]: unrecognized selector sent to instance
+* **[Fix]** iOS: `descriptor.write()` would timeout or not work (regression somewhere around ~1.7.0)
+* **[Fix]** `isNotifying` was not updated by `setNotifyValue(false)` (regression somewhere around ~1.9.0)
+
+## 1.16.12
+* **[Fix]** Android: onValueReceived was not working on Android 12 & lower (regression 1.16.3)
+
+## 1.16.11
+* **[Fix]** Android: onCharacteristicReceived not being called (regression 1.16.3)
+
+## 1.16.10
+* **[Fix]** BluetoothDevice: don't wait for timeout if device becomes disconnected
+
+## 1.16.9
+* **[Example]** cleaned up Characteristic tile code
+
+## 1.16.8
+* **[Fix]** `scanResults` & `isScanning` streams were not re-emitting their current value on listen (regression 1.5.0)
+* **[Example]** discoverServices: stay on screen after diconnection
+* **[Example]** simplified `connectingOrDisconnecting` code
+* **[Example]** organize into 'screens' and 'widgets' folders
+
+## 1.16.7
+* **[Rename]** `isAvailable` -> `isSupported`
+
+## 1.16.6
+* **[Example]** Refactor: hugely refactored to use stateful widgets
+* **[Example]** Fix: stream already listened to error
+* **[Improve]** `connectionState` & `mtu`: use broadcast stream
+
+## 1.16.5
+* **[Fix]** iOS: iOS Unhandled Exception: type 'int' is not a subtype of type 'bool' (regression 1.16.3)
+* **[Improve]** android: prepend logs with '[FBP]'
+* **[Java]** rename `com.boskokg.flutter_blue_plus` -> `com.lib.flutter_blue_plus` to be more generic
+
+## 1.16.4
+* **[Fix]** `setLogLevel` would be ignored due to being called twice
+* **[Improve]** android: use log level consistently
+* **[Improve]** iOS: use log level macro
+
+## 1.16.3
+* **[Fix]** Android: `setNotify` would timeout if CCCD descriptor does not exist
+* **[Android]** fix deprecations
+* **[Improve]** removeIfGone: only push to scanResults when list changes
+
+## 1.16.2
+* **[Fix]** platform check in `onNameChanged` & `onServicesChanged` was incorrect
+
+## 1.16.1
+* **[Add]** iOS: add support for `onServicesChanged` & `onNameChanged`
+
+## 1.16.0
+This release simplifies BluetoothDevice construction.
+* **[Breaking Change]** remove `BluetoothDevice.type` & `BluetoothDevice.localName` from constructor for simplicity
+* **[Breaking Change]** remove `servicesStream` & `isDiscoveringServices` deprecated functions
+* **[Rename]** `localName` -> `platformName` to reflect platform specific behavior
+* **[Fix]** `setNotifyValue` must take `descWrite` mutex
+* **[Fix]** `localName` was broken when using `connectedSystemDevices` (regression 1.15.10)
+* **[Add]** Android: getPhySupport
+
+## 1.15.10
+* **[Fix]** iOS: `localName` does not match Android
+* **[Fix]** flutterHotRestart: error was thrown if device did not have bluetooth adapter
+
+## 1.15.9
+* **[Fix]** iOS: adapter turnOff: edge case when adapter is turned off while scanning
+* **[Fix]** iOS: adapter turnOff: disconnect handlers not firing when adapter turned off
+* **[Fix]** iOS: adapter turnOff: API MISUSE when adapter is turned off
+* **[Cleanup]** Hot Restart: use separate conenctedCount method for clarity
+
+## 1.15.8
+* **[Fix]** if any platform exception happens, fbp will deadlock (regression 1.14.20)
+
+## 1.15.7
+* **[Fix]** android: turning bluetooth off would not fully disconnect devices (regression 1.14.19)
+
+## 1.15.6
+* **[Fix]** iOS: turning bluetooth off would not fully disconnect devices (regression 1.14.19)
+* **[Readme]** add v1.15.0 migration guides
+
+## 1.15.5
+* **[Fix]** `firstWhereOrNull` conflict (regression in 1.15.0)
+
+## 1.15.4
+* **[Fix]** some typos in disconnect exceptions (from 1.15.3)
+
+## 1.15.3
+* **[Improve]** prefer dart exceptions over platform exceptions when device is disconnected
+
+## 1.15.2
+* **[Fix]** stopScan was not awaiting for invokeMethod
+
+## 1.15.1
+* **[Fix]** FlutterBluePlus.scanResults should always return list copy to avoid iteration exceptions
+
+## 1.15.0
+## Scanning API Changes
+
+**Overview**:
+* **[Refactor]** simplify scanning api
+* **[Feature]** add `removeIfGone` option to `startScan`
+
+**Breaking Changes & Improvements:**
+- **(simplify)** removed `FlutterBluePlus.scan`. Use `FlutterBluePlus.scartScan(oneByOne: true)` instead.
+- **(simplify)** removed `allowDuplicates` option for `scartScan`. It is not supported on android. We always filter duplicates anyway.
+- **(simplify)** removed `macAddresses` option for `scartScan`. It was not supported on iOS, and is overall not very useful.
+- **(simplify)** `startScan` now returns `Future<void>` instead of `Future<List<ScanResult>>`. It was redundant and confusing.
+- **(improvement)** if you `await startScan` it will complete once the scan starts, instead of when it ends
+- **(improvement)** if you call `startScan` twice, it will cancel the previous scan, instead of throwing an exception
+
+## 1.14.24
+* **[Fix]** Android: setNotifyValue: (code: 5) notifications were not updated
+* **[Fix]** Hot Restart: stop scanning when hot restarting
+
+## 1.14.23
+* **[Fix]** setNotifyValue & others must be cleared after disconnection (regression in 1.14.21)
+
+## 1.14.22
+* **[Fix]** Android: Hot Restart: could get stuck in infinite loop (regression in 1.14.19)
+
+## 1.14.21
+* **[Refactor]** dart: store lastValue at global level so Desc & Chr classes are fully immutable
+
+## 1.14.20
+* **[Fix]** iOS: Hot Restart: could get stuck in infinite loop (regression in 1.14.19)
+
+## 1.14.19
+* **[Fix]** Hot Restart: close all connections when dart vm is restarted
+
+## 1.14.18
+* **[Fix]** Android: crash uuid128 null deref (regression in 1.14.17)
+
+## 1.14.17
+* **[Fix]** Android: shortUUID: characteristic not found
+
+## 1.14.16
+* **[Fix]** macOS: lower required version to 10.11 (equivalent to  iOS 9.0)
+
+## 1.14.15
+* **[Rename]** allowSplits -> allowLongWrite
+
+## 1.14.14
+* **[Fix]** Android: dataLen longer than allowed (regression in 1.14.13)
+
+## 1.14.13
+* **[Fix]** iOS: onMtuChanged was not called
+* **[Feature]** iOS & Android: writeCharacteristic: add 'allowLongWrite' option to do longer writes
+
+## 1.14.12
+* **[Fix]** Android: autoconnect was not working. regressed sometimes after 1.4.0
+* **[Cleanup]** Android: cleanup bmAdvertisementData
+* **[Improve]** iOS: check that characteristic supports READ, WRITE, WRITE_NO_RESP properties and throw error otherwise
+
 ## 1.14.11
 * **[Deprecate]** dart: isDiscoveringServices & servicesStream. They can be easily implemented yourself
 
@@ -43,6 +281,7 @@
 * **[improve]** Dart: each FlutterBluePlusException should have unique code for handling
 
 ## 1.14.0
+This release improves bonding support.
 * **[feature]** Android:  expose BluetoothDevice.bondState
 * **[remove]** changes regarding bond state made in 1.13.0 in favor of exposing bondState
 * **[refactor]** BluetoothDevice & Android bond handling to improve reliablility & error handling.
@@ -70,7 +309,7 @@
 * **[improve]** Android/iOS: on connection failure, return error code and error string
 
 ## 1.13.0
-This release focuses on improving bonding support.
+This release improves bonding support.
 * **[fix]** Android: discoverServices & others can fail if currently in the process of bonding
 * **[improve]** Android: createBond: check for success and throw exception on failure
 * **[improve]** Android: removeBond: return Future(void) instead of Future(Bool), and throw exception on failure
@@ -133,6 +372,7 @@ This release focuses on improving bonding support.
 * **[improve]** Android: simplify build.grade to not set specific gradle version. it is uneeded
 
 ## 1.12.0
+This release simplifies permissions.
 * **[improve]** Android: remove permissions from plugin. It is easier for user to specify everything
 * **[fix]** Dart: scan could be initiated twice causing bad state
 * **[fix]** Dart: read & write mutexs must always come from the MutexFactory to properly prevent race conditions
@@ -166,9 +406,10 @@ This release focuses on improving bonding support.
 * **[improve]** Dart: add back servicesList, but with simpler api
 
 ## 1.11.0
-* **[rename]** Dart:  connectedDevices -> connectedSystemDevices
-* **[remove]** Dart:  servicesList (introduced in 1.10.6)
+This release removes recent changes to the API causing issues.
 * **[remove]** Dart:  includeConnectedSystemDevices scan setting, it was too complicated 
+* **[remove]** Dart:  servicesList (introduced in 1.10.6)
+* **[rename]** Dart:  connectedDevices -> connectedSystemDevices
 
 ## 1.10.10
 * **[fix]** Android: platform exception when scanning with includeConnectedSystemDevices (Regression in 1.10.6)
@@ -209,10 +450,9 @@ This release focuses on improving bonding support.
 * **[improve]** Example: add error handling to descriptor read & write
 
 ## 1.10.0
-This release is focused on improving error handling and reliability.
-There are 2 small breaking changes. See below.
-* **BREAKING CHANGE:** Dart: turnOn() & turnOff() now wait for completion, return void instead of bool, and can throw
-* **BREAKING CHANGE:** Dart: use static functions for FlutterBluePlus instead of FlutterBluePlus.instance. Multiple instances is not supported by any platform.
+This release improves error handling and reliability.
+* **[BREAKING CHANGE]** Dart: turnOn() & turnOff() now wait for completion, return void instead of bool, and can throw
+* **[BREAKING CHANGE]** Dart: use static functions for FlutterBluePlus instead of FlutterBluePlus.instance. Multiple instances is not supported by any platform.
 * **[improve]** readme: add error handling section
 * **[improve]** iOS: handle missing bluetooth adapter gracefully
 * **[improve]** iOS: getAdapterState && getConnectionState are more robust
@@ -250,15 +490,14 @@ There are 2 small breaking changes. See below.
 This release marks the end of major work to improve reliability and
 simplicity of the FlutterBluePlus codebase. Please submit bug reports.
 
-* **ANDROID ONLY BREAKING CHANGE:** When `read()` is called `onValueChangedStream` is pushed to as well. This change was made to make both platforms behave the same way. It is an unavoidable limitation of iOS. See: https://github.com/boskokg/flutter_blue_plus/issues/419
-
+* **[Breaking Change/Fix]** Android: When `read()` is called `onValueChangedStream` is pushed to as well. This change was made to make both platforms behave the same way. It is an unavoidable limitation of iOS. See: https://github.com/boskokg/flutter_blue_plus/issues/419
 * **[fix]** Android/iOS: mtu check minus 3 issue (reggression in 1.8.3)
 * **[fix]** Dart: BluetoothCharacteristic.state variable not working (bug introduced 1.8.6)
 * **[fix]** Dart: FlutterBluePlus.state variable not working (bug introduced 1.8.6)
-* **[improve]** Dart: deprecate: BluetoothCharacteristic.value -> lastValueStream
-* **[improve]** Dart: deprecate: BluetoothDescriptor.value -> lastValueStream
-* **[improve]** Dart: deprecate: BluetoothCharacteristic.onValueChangedStream -> onValueReceived
-* **[improve]** Dart: deprecate: BluetoothDescriptor.onValueChangedStream -> onValueReceived
+* **[rename]** BluetoothCharacteristic.value -> lastValueStream
+* **[rename]** BluetoothDescriptor.value -> lastValueStream
+* **[rename]** BluetoothCharacteristic.onValueChangedStream -> onValueReceived
+* **[rename]** BluetoothDescriptor.onValueChangedStream -> onValueReceived
 * **[refactor]** Dart: adapterState to use methodChannel
 * **[refactor]** Dart: various 'bm' message schemas to use simpler characteristic structure
 * **[refactor]** Dart: BmSetNotificationResponse removed. It is simpler to reuse BmWriteDescriptorResponse
@@ -305,6 +544,7 @@ simplicity of the FlutterBluePlus codebase. Please submit bug reports.
 * **[fix]** Android: characteristic properties check was incorrect (regression in 1.7.8)
 
 ## 1.8.0
+This release improves error handling.
 * **[improve]** android/ios: handle errors for charactersticRead
 * **[improve]** android/ios: handle errors for readDescriptor
 * **[improve]** android/ios: handle errors for discoverServices
@@ -348,6 +588,7 @@ simplicity of the FlutterBluePlus codebase. Please submit bug reports.
 * **[fix]** iOS: when connecting, exception is thrown (regression in 1.7.0)
 
 ## 1.7.0
+This release removes Protobuf.
 * **[refactor]** removed protobuf dependency 
 * **[fix]** Android: turnOn and turnOff not working (regression in 1.6.1)
 * **[fix]** Dart: guid exception with serviceUUID is empty
@@ -361,6 +602,7 @@ simplicity of the FlutterBluePlus codebase. Please submit bug reports.
 * **[improve]** Android: significantly clean up all code
 
 ## 1.6.0
+This release reformats a bunch of Android code.
 * **[fix]** Dart: close BufferStream listen on stopScan
 * **[improve]** Dart: don't repropogate Mutex error
 * **[improve]** Dart: better stacktrace on error for Characteristic Read/Write
@@ -380,6 +622,7 @@ simplicity of the FlutterBluePlus codebase. Please submit bug reports.
 * **[improve]** iOS: logs now adhere to logLevel
 
 ## 1.5.0
+This release closes many open issues on Github.
 * **[fix]** Dart: writeCharacteristic (and other similar functions) exception could be missed
 * **[fix]** Dart: setNotifyValue should check for success and throw error on failure
 * **[fix]** Dart: race conditions in connect(), disconnect(), readRssi(), writeCharacteristic(), readCharacteristic()
@@ -453,41 +696,187 @@ simplicity of the FlutterBluePlus codebase. Please submit bug reports.
 
 * First public release
 
-## Versions made while fixing bugs in fork https://github.com/boskokg/flutter_blue:
+---
+
+# FORKED FLUTTER_BLUE
+
+---
 
 ## 0.12.0
 
-Supporting Android 12 Bluetooth permissions. #940
+* Supporting Android 12 Bluetooth permissions. #940
 
 ## 0.12.0
 
-Delay Bluetooth permission & turn-on-Bluetooth system popups on iOS #964
+* Delay Bluetooth permission & turn-on-Bluetooth system popups on iOS #964
 
 ## 0.11.0
 
-The timeout was throwing out of the Future's scope #941
-Expose onValueChangedStream #882
-Android: removed V1Embedding
-Android: removed graddle.properties
-Android: enable background usage
-Android: cannot handle devices that do not set CCCD_ID (2902) includes BLUNO #185 #797
-Android: add method for getting bonded devices #586
-Ios: remove support only for x86_64 simulators
-Ios: Don't initialize CBCentralManager until needed #599
+* The timeout was throwing out of the Future's scope #941
+* Expose onValueChangedStream #882
+* Android: removed V1Embedding
+* Android: removed graddle.properties
+* Android: enable background usage
+* Android: cannot handle devices that do not set CCCD_ID (2902) includes BLUNO #185 #797
+* Android: add method for getting bonded devices #586
+* Ios: remove support only for x86_64 simulators
+* Ios: Don't initialize CBCentralManager until needed #599
 
 ## 0.10.0
 
-mtuRequest returns the negotiated MTU
-Android: functions to turn on/off bluetooth
-Android: add null check if channel is already teared down
-Android: code small refactoring (fixed AS warnings)
-Android: add null check if channel is already teared down
-Ios: widen protobuf version allowed
+* mtuRequest returns the negotiated MTU
+* Android: functions to turn on/off bluetooth
+* Android: add null check if channel is already teared down
+* Android: code small refactoring (fixed AS warnings)
+* Android: add null check if channel is already teared down
+* Ios: widen protobuf version allowed
 
 ## 0.9.0
 
-Android migrate to mavenCentral.
-Android support build on Macs M1
-Android protobuf-gradle-plugin:0.8.15 -> 0.8.17
-Ios example upgrade to latest flutter 2.5
-deprecated/removed widgets fixed in example
+* Android migrate to mavenCentral.
+* Android support build on Macs M1
+* Android protobuf-gradle-plugin:0.8.15 -> 0.8.17
+* Ios example upgrade to latest flutter 2.5
+* deprecated/removed widgets fixed in example
+
+## 0.8.0
+* Migrate the plugin to null safety.
+
+## 0.7.3
+* Fix Android project template files to be compatible with protobuf-lite.
+* Add experimental support for MacOS.
+
+## 0.7.2
+* Add `allowDuplicates` option to `startScan`.
+* Fix performance issue with GUID initializers.
+
+## 0.7.1+1
+* Fix for FlutterBlue constructor when running on emulator.
+* Return error when attempting to `discoverServices` while not connected.
+
+## 0.7.1
+* Fix incorrect value notification when write is performed.
+* Add `toString` to each bluetooth class.
+* Various other bug fixes.
+
+## 0.7.0
+* Support v2 android embedding.
+* Various bug and documentation fixes.
+
+## 0.6.3+1
+* Fix compilation issue with iOS.
+* Bump protobuf version to 1.0.0.
+
+## 0.6.3
+* Update project files for Android and iOS.
+* Remove dependency on protoc for iOS.
+
+## 0.6.2
+* Add `mtu` and `requestMtu` to BluetoothDevice.
+
+## 0.6.0+4
+* Fix duplicate characteristic notifications when connection lost.
+* Fix duplicate characteristic notifications when reconnecting.
+* Add minimum SDK version of 18 for the plugin.
+* Documentation updates.
+
+## 0.6.0
+* **Breaking change**. API refactoring with RxDart (see example).
+* Log a more detailed warning at build time about the previous AndroidX migration.
+* Ensure that all channel calls to the Dart side from the Java side are done on the UI thread.
+  This change allows Transactions to work with upcoming Engine restrictions, which require
+  channel calls be made on the UI thread. Note this is an Android only change,
+  the iOS implementation was not impacted.
+
+## 0.5.0
+* **Breaking change**. Migrate from the deprecated original Android Support
+  Library to AndroidX. This shouldn't result in any functional changes, but it
+  requires any Android apps using this plugin to [also
+  migrate](https://developer.android.com/jetpack/androidx/migrate) if they're
+  using the original support library.
+
+## 0.4.2+1
+* Upgrade Android Gradle plugin to 3.3.0.
+* Refresh iOS build files.
+
+## 0.4.2
+* Set the verbosity of log messages with `setLogLevel`.
+* Updated iOS and Android project files.
+* `autoConnect` now configurable for Android.
+* Various bug fixes.
+
+## 0.4.1
+* Fixed bug where setNotifyValue wasn't properly awaitable.
+* Various UI bug fixes to example app.
+* Removed unnecessary intl dependencies in example app.
+
+## 0.4.0
+* **Breaking change**. Manufacturer Data is now a `Map` of manufacturer ID's.
+* Service UUID's, service data, tx power level packets fixed in advertising data.
+* Example app updated to show advertising data.
+* Various other bug fixes.
+
+## 0.3.4
+* Updated to use the latest protobuf (^0.9.0+1).
+* Updated other dependencies.
+
+## 0.3.3
+* `scan` `withServices` to filter by service UUID's (iOS).
+* Error handled when trying to scan with adapter off (Android).
+
+## 0.3.2
+* Runtime permissions for Android.
+* `scan` `withServices` to filter by service UUID's (Android).
+* Scan mode can be specified (Android).
+* Now targets the latest android SDK.
+* Dart 2 compatibility.
+
+## 0.3.1
+* Now allows simultaneous notifications of characteristics.
+* Fixed bug on iOS that was returning `discoverServices` too early.
+
+## 0.3.0
+* iOS support added.
+* Bug fixed in example causing discoverServices to be called multiple times.
+* Various other bug fixes.
+
+## 0.2.4
+* **Breaking change**. Upgraded to Gradle 4.1 and Android Studio Gradle plugin
+  3.0.1. Older Flutter projects need to upgrade their Gradle setup as well in
+  order to use this version of the plugin. Instructions can be found
+  [here](https://github.com/flutter/flutter/wiki/Updating-Flutter-projects-to-Gradle-4.1-and-Android-Studio-Gradle-plugin-3.0.1).
+
+## 0.2.3
+* Bug fixes
+
+## 0.2.2
+* **Breaking changes**:
+* `startScan` renamed to `scan`.
+* `ScanResult` now returns a `BluetoothDevice`.
+* `connect` now takes a `BluetoothDevice` and returns Stream<BluetoothDeviceState>.
+* Added parameter `timeout` to `connect`.
+* Automatic disconnect on deviceConnection.cancel().
+
+## 0.2.1
+* **Breaking change**. Removed `stopScan` from API, use `scanSubscription.cancel()` instead.
+* Automatically stops scan when `startScan` subscription is canceled (thanks to @brianegan).
+* Added `timeout` parameter to `startScan`.
+* Updated example app to show new scan functionality.
+
+## 0.2.0
+
+* Added state and onStateChanged for BluetoothDevice.
+* Updated example to show new functionality.
+
+## 0.1.1
+
+* Fixed image for pub.dartlang.org.
+
+## 0.1.0
+
+* Characteristic notifications/indications.
+* Merged in Guid library, removed from pubspec.yaml.
+
+## 0.0.1 - September 1st, 2017
+
+* Initial Release.

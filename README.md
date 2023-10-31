@@ -1,4 +1,5 @@
 [![pub package](https://img.shields.io/pub/v/flutter_blue_plus.svg)](https://pub.dartlang.org/packages/flutter_blue_plus)
+[![Chat](https://img.shields.io/discord/634853295160033301.svg?style=flat-square&colorB=758ED3)](https://discord.gg/Yk5Efra)
 
 <br>
 <p align="center">
@@ -6,7 +7,9 @@
 </p>
 <br><br>
 
-**Note: this plugin is continuous work from [FlutterBlue](https://github.com/pauldemarco/flutter_blue) since maintenance stopped.**
+**Note: this plugin is continuous work from [FlutterBlue](https://github.com/pauldemarco/flutter_blue).**
+
+Migrating from [FlutterBlue](https://github.com/pauldemarco/flutter_blue)? See [Migration Guides](MIGRATION.md)
 
 ## Contents
 
@@ -15,6 +18,7 @@
 - [Getting Started](#getting-started)
 - [Reference](#reference)
 - [Debugging](#debugging)
+- [Mocking](#mocking)
 - [Common Problems](#common-problems)
 
 ## Introduction
@@ -47,6 +51,19 @@ This makes FlutterBluePlus very stable, and easy to maintain.
 
 Please star this repo & on [pub.dev](https://pub.dev/packages/flutter_blue_plus). We all benefit from having a larger community.
 
+## Example
+
+FlutterBluePlus has a beautiful example app, useful to debug issues.
+
+```
+cd ./example
+flutter run
+```
+
+<p align="center">
+<img alt="FlutterBlue" src="https://github.com/boskokg/flutter_blue_plus/blob/master/site/example.png?raw=true" />
+</p>
+
 ## Usage
 
 ### :fire: Error Handling :fire:
@@ -55,7 +72,7 @@ Flutter Blue Plus takes error handling very seriously.
 
 Every error returned by the native platform is checked and thrown as an exception where appropriate. See [Reference](#reference) for a list of throwable functions.
 
-**Streams:** At the time of writing, streams returned by Flutter Blue Plus never emit any errors and never close. There's no need to handle `onError` or `onDone` for  `stream.listen(...)`.
+**Streams:** At the time of writing, streams returned by Flutter Blue Plus never emit any errors and never close. There's no need to handle `onError` or `onDone` for  `stream.listen(...)`. The one exception is `FlutterBluePlus.scanResults`, which you should handle `onError`.
 
 ---
 
@@ -79,28 +96,33 @@ Setting `LogLevel.verbose` shows *all* data in and out.
 
 ### Enable Bluetooth
 
-**Note:** On iOS, a "*This app would like to use Bluetooth*" system dialogue appears on first call to a FlutterBluePlus method. This is when the `CBCentralManager` (iOS) & `BluetoothManager` (Android) are initialized.
+**Note:** On iOS, a "*This app would like to use Bluetooth*" system dialogue appears on first call to any FlutterBluePlus method. 
  
 ```dart
-// check adapter availability
-if (await FlutterBluePlus.isAvailable == false) {
+// check if bluetooth is supported by your hardware
+// Note: The platform is initialized on the first call to any FlutterBluePlus method.
+if (await FlutterBluePlus.isSupported == false) {
     print("Bluetooth not supported by this device");
     return;
 }
+
+// handle bluetooth on & off
+// note: for iOS the initial state is typically BluetoothAdapterState.unknown
+// note: if you have permissions issues you will get stuck at BluetoothAdapterState.unauthorized
+FlutterBluePlus.adapterState.listen((BluetoothAdapterState state) {
+    print(state);
+    if (state == BluetoothAdapterState.on) {
+        // usually start scanning, connecting, etc
+    } else {
+        // show an error to the user, etc
+    }
+});
 
 // turn on bluetooth ourself if we can
 // for iOS, the user controls bluetooth enable/disable
 if (Platform.isAndroid) {
     await FlutterBluePlus.turnOn();
 }
-
-// wait bluetooth to be on & print states
-// note: for iOS the initial state is typically BluetoothAdapterState.unknown
-// note: if you have permissions issues you will get stuck at BluetoothAdapterState.unauthorized
-await FlutterBluePlus.adapterState
- .map((s){print(s);return s;})
- .where((s) => s == BluetoothAdapterState.on)
- .first;
 ```
 
 ### Scan for devices
@@ -108,16 +130,23 @@ await FlutterBluePlus.adapterState
 If your device is not found, see [Common Problems](#common-problems).
 
 ```dart
-// Setup Listener for scan results
+// Setup Listener for scan results.
 // device not found? see "Common Problems" in the README
-var subscription = FlutterBluePlus.scanResults.listen((results) {
-    for (ScanResult r in results) {
-        print('${r.device.localName} found! rssi: ${r.rssi}');
-    }
-});
+Set<DeviceIdentifier> seen = {};
+var subscription = FlutterBluePlus.scanResults.listen(
+    (results) {
+        for (ScanResult r in results) {
+            if (seen.contains(r.device.remoteId) == false) {
+                print('${r.device.remoteId}: "${r.advertisementData.localName}" found! rssi: ${r.rssi}');
+                seen.add(r.device.remoteId);
+            }
+        }
+    },
+    onError(e) => print(e);
+);
 
 // Start scanning
-FlutterBluePlus.startScan(timeout: Duration(seconds: 4));
+await FlutterBluePlus.startScan();
 
 // Stop scanning
 await FlutterBluePlus.stopScan();
@@ -129,8 +158,9 @@ await FlutterBluePlus.stopScan();
 // listen for disconnection
 device.connectionState.listen((BluetoothConnectionState state) async {
     if (state == BluetoothConnectionState.disconnected) {
-        // typically, start a periodic timer that tries to periodically reconnect.
-        // Note: you must always re-discover services after disconnection!
+        // 1. typically, start a periodic timer that tries to 
+        //    periodically reconnect, or just call connect() again right now
+        // 2. you must always re-discover services after disconnection!
     }
 });
 
@@ -141,40 +171,76 @@ await device.connect();
 await device.disconnect();
 ```
 
+### Get MTU and request larger size
+
+```dart
+final mtuSubscription = device.mtu.listen((int mtu) {
+    // iOS: initial value is always 23, but iOS will quickly negotiate a higher value
+    // android: you must request higher mtu yourself
+    print("mtu $mtu");
+});
+
+// cleanup: cancel subscription when disconnected
+device.cancelWhenDisconnected(mtuSubscription);
+
+// Very important!
+if (Platform.isAndroid) {
+    await device.requestMtu(512);
+}
+```
+
 ### Discover services
 
 ```dart
-// Note: You must call this again if disconnected!
+// Note: You must call discoverServices after every re-connection!
 List<BluetoothService> services = await device.discoverServices();
 services.forEach((service) {
     // do something with service
 });
 ```
 
-### Read and write characteristics
+### Read Characteristics
 
 ```dart
 // Reads all characteristics
 var characteristics = service.characteristics;
 for(BluetoothCharacteristic c in characteristics) {
-    List<int> value = await c.read();
-    print(value);
+    if (c.properties.read) {
+        List<int> value = await c.read();
+        print(value);
+    }
 }
-
-// Writes to a characteristic
-await c.write([0x12, 0x34])
 ```
 
-If you want write large messages regardless of mtu, define this function.
+### Write Characteristic
+
+```dart
+// Writes to a characteristic
+await c.write([0x12, 0x34]);
+```
+
+**allowLongWrite**: To write large characteristics (up to 512 bytes) regardless of mtu, use `allowLongWrite`:
+
+```dart
+/// allowLongWrite should be used with caution. 
+///   1. it can only be used *with* response to avoid data loss
+///   2. the peripheral device must support the 'long write' ble protocol.
+///   3. Interrupted transfers can leave the characteristic in a partially written state
+///   4. If the mtu is small, it is very very slow.
+await c.write(data, allowLongWrite:true);
+```
+
+**splitWrite**: To write lots of data (unlimited), you can define the `splitWrite` function. 
 
 ```dart
 import 'dart:math';
-
-// split large writes
-// Note: This can only be used for write (with response) to avoid data loss
-extension WriteLarge on BluetoothCharacteristic {
-  Future<void> writeLarge(List<int> value, int mtu, {int timeout = 15}) async {
-    int chunk = mtu-3;
+// writeSplit should be used with caution.
+//    1. due to splitting, `characteristic.read()` will return partial data.
+//    2. it can only be used *with* response to avoid data loss
+//    3. The characteristic must be designed to support split data
+extension splitWrite on BluetoothCharacteristic {
+  Future<void> splitWrite(List<int> value, {int timeout = 15}) async {
+    int chunk = (await device.mtu.first) - 3; // 3 bytes ble overhead
     for (int i = 0; i < value.length; i += chunk) {
       List<int> subvalue = value.sublist(i, min(i + chunk, value.length));
       await write(subvalue, withoutResponse:false, timeout: timeout);
@@ -199,39 +265,108 @@ await d.write([0x12, 0x34])
 
 ### Set notifications and listen to changes
 
-If onValueReceived is never called, see [Common Problems](#common-problems) in the README.
+If `onValueReceived` is never called, see [Common Problems](#common-problems) in the README.
 
 ```dart
-// Setup Listener for characteristic reads
-// If this is never called, see "Common Problems" in the README
-characteristic.onValueReceived.listen((value) {
-    // do something with new value
+final chrSubscription = characteristic.onValueReceived.listen((value) {
+    // onValueReceived is updated:
+    //   - anytime read() is called
+    //   - anytime a notification arrives (if subscribed)
 });
+
+// cleanup: cancel subscription when disconnected
+device.cancelWhenDisconnected(chrSubscription);
 
 // enable notifications
 await characteristic.setNotifyValue(true);
 ```
 
-### Get Connected System Devices
+### Last Value Stream
 
-These devices are already connected to the system, but must be reconnected by *your app* before you can communicate with them.
+`lastValueStream` is an alternative to `onValueReceived`. It emits a value any time the characteristic changes, **including writes.**
+
+It is very convenient for simple characteristics that support both WRITE and READ (and/or NOTIFY). **e.g.** a "light switch toggle" characteristic. 
 
 ```dart
-List<BluetoothDevice> connectedSystemDevices = await FlutterBluePlus.connectedSystemDevices;
-for (var d in connectedSystemDevices) {
+final chrSubscription = characteristic.lastValueStream.listen((value) {
+    //lastValueStream` is updated:
+    //   - anytime read() is called
+    //   - anytime write() is called
+    //   - anytime a notification arrives (if subscribed)
+    //   - also when first listened to, it re-emits the last value for convenience.
+});
+
+// cleanup: cancel subscription when disconnected
+device.cancelWhenDisconnected(chrSubscription);
+
+// enable notifications
+await characteristic.setNotifyValue(true);
+```
+
+### Get Connected Devices
+
+Get devices currently connected to your app.
+
+```dart
+List<BluetoothDevice> devs = FlutterBluePlus.connectedDevices;
+for (var d in devs) {
+    print(d);
+}
+```
+
+### Get System Devices
+
+Get devices connected to the system by *any* app.
+
+**Note:** you must connect *your app* to them before you can communicate with them.
+
+```dart
+List<BluetoothDevice> devs = await FlutterBluePlus.systemDevices;
+for (var d in devs) {
     await d.connect(); // Must connect *our* app to the device
     await d.discoverServices();
 }
 ```
 
-### Read the MTU and request larger size
+### Create Bond (Android Only)
+
+**Note:** calling this is usually not necessary!! The platform will do it automatically. 
+
+However, you can force the popup to show sooner.
 
 ```dart
-final mtu = await device.mtu.first;
-await device.requestMtu(512);
+    final bsSubscription = device.bondState.listen((value) {
+        print("$value prev:{$device.prevBondState}");
+    });
+
+    // cleanup: cancel subscription when disconnected
+    device.cancelWhenDisconnected(bsSubscription);
+
+    // Force the bonding popup to show now (Android Only) 
+    await device.createBond();
+
+    // remove bond
+    await device.removeBond();
 ```
 
-Note that iOS will not allow requests of MTU size, and will always try to negotiate the highest possible MTU (iOS supports up to MTU size 185)
+### Events API
+
+Access streams from all devices simultaneously.
+
+There are streams for:
+* events.connectionState
+* events.onCharacteristicReceived
+* events.onDescriptorRead
+* events.onNameChanged
+* events.onServicesChanged
+* events.bondState
+
+```dart
+// listen to *any device* connection state changes 
+FlutterBluePlus.events.connectionState.listen((event)) {
+    print('${event.device} ${event.connectionState}');
+}
+```
 
 ## Getting Started
 
@@ -304,7 +439,7 @@ flutterBlue.startScan(timeout: Duration(seconds: 4), androidUsesFineLocation: tr
 Add the following line in your `project/android/app/proguard-rules.pro` file:
 
 ```
--keep class com.boskokg.flutter_blue_plus.* { *; }
+-keep class com.lib.flutter_blue_plus.* { *; }
 ```
 
 to avoid seeing the following kind errors in your `release` builds:
@@ -335,41 +470,61 @@ In the **ios/Runner/Info.plist** let’s add:
 
 For location permissions on iOS see more at: [https://developer.apple.com/documentation/corelocation/requesting_authorization_for_location_services](https://developer.apple.com/documentation/corelocation/requesting_authorization_for_location_services)
 
+## Mocking
+
+To mock `FlutterBluePlus` for development, refer to the [Mocking Guide](MOCKING.md).
+
 ## Reference
 
-### FlutterBlue API
+🌀 = Stream
+
+### FlutterBluePlus API
 
 |                        |      Android       |        iOS         | Throws | Description                                                |
 | :--------------------- | :----------------: | :----------------: | :----: | :----------------------------------------------------------|
-| isAvailable            | :white_check_mark: | :white_check_mark: |        | Checks whether the device supports Bluetooth               |
+| isSupported            | :white_check_mark: | :white_check_mark: |        | Checks whether the device supports Bluetooth               |
 | turnOn                 | :white_check_mark: |                    | :fire: | Turns on the bluetooth adapter                             |
-| adapterState           | :white_check_mark: | :white_check_mark: |        | Stream of on & off states of the bluetooth adapter         |
-| scan                   | :white_check_mark: | :white_check_mark: | :fire: | Starts a scan for Ble devices and returns a stream         |
-| startScan              | :white_check_mark: | :white_check_mark: | :fire: | Starts a scan for Ble devices with no return value         |
+| adapterState        🌀 | :white_check_mark: | :white_check_mark: |        | Stream of on & off states of the bluetooth adapter         |
+| startScan              | :white_check_mark: | :white_check_mark: | :fire: | Starts a scan for Ble devices                              |
 | stopScan               | :white_check_mark: | :white_check_mark: | :fire: | Stop an existing scan for Ble devices                      |
-| scanResults            | :white_check_mark: | :white_check_mark: |        | Stream of live scan results                                |
-| isScanning             | :white_check_mark: | :white_check_mark: |        | Stream of current scanning state                           |
+| scanResults         🌀 | :white_check_mark: | :white_check_mark: |        | Stream of live scan results                                |
+| isScanning          🌀 | :white_check_mark: | :white_check_mark: |        | Stream of current scanning state                           |
 | isScanningNow          | :white_check_mark: | :white_check_mark: |        | Is a scan currently running?                               |
-| connectedSystemDevices | :white_check_mark: | :white_check_mark: |        | List of already connected devices, including by other apps |
+| connectedDevices       | :white_check_mark: | :white_check_mark: |        | List of devices connected to *your app*                    |
+| systemDevices          | :white_check_mark: | :white_check_mark: |        | List of devices connected to the system, even by other apps|
 | setLogLevel            | :white_check_mark: | :white_check_mark: |        | Configure plugin log level                                 |
+| getPhySupport          | :white_check_mark: |                    | :fire: | Get supported bluetooth phy codings                        |
+
+### FlutterBluePlus Events API
+
+|                                    |      Android       |        iOS         | Throws | Description                                           |
+| :--------------------------------- | :----------------: | :----------------: | :----: | :-----------------------------------------------------|
+| events.connectionState          🌀 | :white_check_mark: | :white_check_mark: |        | Stream of connection changes of *all devices*         |
+| events.onCharacteristicReceived 🌀 | :white_check_mark: | :white_check_mark: |        | Stream of characteristic value reads of *all devices* |
+| events.onDescriptorRead         🌀 | :white_check_mark: | :white_check_mark: |        | Stream of descriptor value reads of *all devices*     |
+| events.onNameChanged            🌀 | :white_check_mark: |                    |        | Stream of name changes of *all devices*               |
+| events.onServicesChanged        🌀 | :white_check_mark: |                    |        | Stream of services changes of *all devices*           |
+| events.bondState                🌀 | :white_check_mark: |                    |        | Stream of bondState changes of *all devices*          |
+
 
 ### BluetoothDevice API
 
 |                           |      Android       |        iOS         | Throws | Description                                                |
 | :------------------------ | :----------------: | :----------------: | :----: | :----------------------------------------------------------|
-| localName                 | :white_check_mark: | :white_check_mark: |        | The cached localName of the device                         |
+| platformName              | :white_check_mark: | :white_check_mark: |        | The platform cached name of the device                     |
 | connect                   | :white_check_mark: | :white_check_mark: | :fire: | Establishes a connection to the device                     |
 | disconnect                | :white_check_mark: | :white_check_mark: | :fire: | Cancels an active or pending connection to the device      |
+| isConnected               | :white_check_mark: | :white_check_mark: |        | Is this device currently connected to *your app*?          |
+| connectionState        🌀 | :white_check_mark: | :white_check_mark: |        | Stream of connection changes for the Bluetooth Device      |
 | discoverServices          | :white_check_mark: | :white_check_mark: | :fire: | Discover services                                          |
-| isDiscoveryingServices    | :white_check_mark: | :white_check_mark: |        | Stream of whether service discovery is in progress         |
 | servicesList              | :white_check_mark: | :white_check_mark: |        | The list of services that were discovered                  |
-| servicesStream            | :white_check_mark: | :white_check_mark: |        | Stream of services changes                                 |
-| connectionState           | :white_check_mark: | :white_check_mark: |        | Stream of connection changes for the Bluetooth Device      |
-| bondState                 | :white_check_mark: |                    |        | Stream of device bond state. Can be useful on Android      |
-| mtu                       | :white_check_mark: | :white_check_mark: | :fire: | Stream of mtu size changes                                 |
+| onServicesChanged      🌀 | :white_check_mark: | :white_check_mark: |        | The services changed & must be rediscovered                |
+| onNameChanged          🌀 | :white_check_mark: | :white_check_mark: |        | The GAP Device Name Characteristic (0x2A00) changed        |
+| mtu                    🌀 | :white_check_mark: | :white_check_mark: | :fire: | Stream of mtu size changes                                 |
 | readRssi                  | :white_check_mark: | :white_check_mark: | :fire: | Read RSSI from a connected device                          |
 | requestMtu                | :white_check_mark: |                    | :fire: | Request to change the MTU for the device                   |
 | requestConnectionPriority | :white_check_mark: |                    | :fire: | Request to update a high priority, low latency connection  |
+| bondState              🌀 | :white_check_mark: |                    |        | Stream of device bond state. Can be useful on Android      |
 | createBond                | :white_check_mark: |                    | :fire: | Force a system pairing dialogue to show, if needed         |
 | removeBond                | :white_check_mark: |                    | :fire: | Remove Bluetooth Bond of device                            |
 | setPreferredPhy           | :white_check_mark: |                    |        | Set preferred RX and TX phy for connection and phy options |
@@ -377,27 +532,27 @@ For location permissions on iOS see more at: [https://developer.apple.com/docume
 
 ### BluetoothCharacteristic API
 
-|                 |      Android       |        iOS         | Throws | Description                                                    |
-| :-------------  | :----------------: | :----------------: | :----: | :--------------------------------------------------------------|
-| uuid            | :white_check_mark: | :white_check_mark: |        | The uuid of characeristic                                      |
-| read            | :white_check_mark: | :white_check_mark: | :fire: | Retrieves the value of the characteristic                      |
-| write           | :white_check_mark: | :white_check_mark: | :fire: | Writes the value of the characteristic                         |
-| setNotifyValue  | :white_check_mark: | :white_check_mark: | :fire: | Sets notifications or indications on the characteristic        |
-| isNotifying     | :white_check_mark: | :white_check_mark: |        | Are notifications or indications currently enabled             |
-| onValueReceived | :white_check_mark: | :white_check_mark: |        | Stream of characteristic value updates received from the device|
-| lastValue       | :white_check_mark: | :white_check_mark: |        | The most recent value of the characteristic                    |
-| lastValueStream | :white_check_mark: | :white_check_mark: |        | Stream of lastValue + onValueReceived                          |
+|                    |      Android       |        iOS         | Throws | Description                                                    |
+| :----------------- | :----------------: | :----------------: | :----: | :--------------------------------------------------------------|
+| uuid               | :white_check_mark: | :white_check_mark: |        | The uuid of characeristic                                      |
+| read               | :white_check_mark: | :white_check_mark: | :fire: | Retrieves the value of the characteristic                      |
+| write              | :white_check_mark: | :white_check_mark: | :fire: | Writes the value of the characteristic                         |
+| setNotifyValue     | :white_check_mark: | :white_check_mark: | :fire: | Sets notifications or indications on the characteristic        |
+| isNotifying        | :white_check_mark: | :white_check_mark: |        | Are notifications or indications currently enabled             |
+| onValueReceived 🌀 | :white_check_mark: | :white_check_mark: |        | Stream of characteristic value updates received from the device|
+| lastValue          | :white_check_mark: | :white_check_mark: |        | The most recent value of the characteristic                    |
+| lastValueStream 🌀 | :white_check_mark: | :white_check_mark: |        | Stream of onValueReceived + writes                             |
 
 ### BluetoothDescriptor API
 
-|                   |      Android       |        iOS         | Throws | Description                                    |
-| :----             | :----------------: | :----------------: | :----: | :----------------------------------------------|
-| uuid              | :white_check_mark: | :white_check_mark: |        | The uuid of descriptor                         |
-| read              | :white_check_mark: | :white_check_mark: | :fire: | Retrieves the value of the descriptor          |
-| write             | :white_check_mark: | :white_check_mark: | :fire: | Writes the value of the descriptor             |
-| onValueReceived   | :white_check_mark: | :white_check_mark: |        | Stream of descriptor value reads & writes      |
-| lastValue         | :white_check_mark: | :white_check_mark: |        | The most recent value of the descriptor        |
-| lastValueStream   | :white_check_mark: | :white_check_mark: |        | Stream of lastValue + onValueReceived          |
+|                    |      Android       |        iOS         | Throws | Description                                    |
+| :----              | :----------------: | :----------------: | :----: | :----------------------------------------------|
+| uuid               | :white_check_mark: | :white_check_mark: |        | The uuid of descriptor                         |
+| read               | :white_check_mark: | :white_check_mark: | :fire: | Retrieves the value of the descriptor          |
+| write              | :white_check_mark: | :white_check_mark: | :fire: | Writes the value of the descriptor             |
+| onValueReceived 🌀 | :white_check_mark: | :white_check_mark: |        | Stream of descriptor value reads & writes      |
+| lastValue          | :white_check_mark: | :white_check_mark: |        | The most recent value of the descriptor        |
+| lastValueStream 🌀 | :white_check_mark: | :white_check_mark: |        | Stream of onValueReceived + writes             |
 
 ## Debugging
 
@@ -439,15 +594,14 @@ These devices may be found in System Settings, but they cannot be connected to b
 - another app may have already connected to your device
 - another phone may have already connected to your device
 
-Try looking through already connected devices:
+Try looking through system devices:
 
 ```dart
-// search already connected devices, including devices
-// connected to by other apps
-List<BluetoothDevice> system = await FlutterBluePlus.connectedSystemDevices;
+// search system devices. i.e. any device connected to by *any* app
+List<BluetoothDevice> system = await FlutterBluePlus.systemDevices;
 for (var d in system) {
-    print('${r.device.localName} already connected to! ${r.device.remoteId}');
-    if (d.localName == "myBleDevice") {
+    print('${r.device.platformName} already connected to! ${r.device.remoteId}');
+    if (d.platformName == "myBleDevice") {
          await r.connect(); // must connect our app
     }
 }
@@ -461,9 +615,11 @@ for (var d in system) {
 
 **4. try a ble scanner app**
 
-Search the App Store for a BLE scanner apps. 
+Search the App Store for a BLE scanner apps and install it on your phone, and another phone.
 
-You should check if they can discover your device.
+**Question 1:** When the issue is happening, is *your phone* (the phone with your flutter app) able to scan it using the 3rd party scanner?
+
+**Question 2:** When the issue is happening, is *another phone* able to scan it using the 3rd party scanner?
 
 ---
 
@@ -491,29 +647,64 @@ Bluetooth is a complicated system service, and can enter a bad state.
 
 ---
 
-### onValueReceived is never called
+### onValueReceived (or lastValueStream) is never called
 
-**1. you are not subscribed OR not calling read**
+**1. you are not calling the right function**
 
-Your device will only send values after you call `await characteristic.setNotifyValue(true)`, or `await characteristic.read()`
+`lastValueStream` is called for `await chr.read()` & `await chr.write()` & `await chr.setNotifyValue(true)` 
 
-**2. you are calling write**
+`onValueReceived` is only called for `await chr.read()` & `await chr.setNotifyValue(true)` 
 
-`onValueReceived` is only called for reads & notifies.
+**2. your device has nothing to send**
 
-You can do a single read with `await characteristic.read(...)`
-
-**3. your device has nothing to send**
-
-If you are using `setNotifyValue`, your device chooses when to send data.
+If you are using `await chr.setNotifyValue(true)`, your _device_ chooses when to send data.
 
 Try interacting with your device to get it to send new data.
 
-**4. your device has bugs**
+**3. your device has bugs**
 
 Try rebooting your ble device. 
 
-Some ble devices have buggy software and stop sending data.
+Some ble devices have buggy software and stop sending data
+
+---
+
+### onValueReceived (or lastValueStream) data is split up
+
+You are probably forgetting to increase the android mtu.
+
+```dart
+if (Platform.isAndroid) {
+    await device.requestMtu(512);
+}
+```
+
+Verify that the mtu is large enough to hold your message.
+
+```dart
+device.mtu
+```
+
+If it still happens, it is a problem with your peripheral device.
+
+---
+
+### onValueReceived (or lastValueStream) is called with duplicate data
+
+You are probably forgetting to cancel the original `stream.listen` resulting in multiple listens.
+
+The easiest solution is to use `device.cancelWhenDisconnected(subscription)` to cancel device subscriptions.
+
+```dart
+final subscription = characteristic.onValueReceived.listen((value) {
+    // ...
+});
+
+// make sure you have this line!
+device.cancelWhenDisconnected(subscription);
+
+await characteristic.setNotifyValue(true);
+```
 
 ---
 
@@ -531,7 +722,7 @@ Characteristics only support writes up to a certain size.
 
 `writeWithoutResponse`: you can only write up to (MTU-3) at a time. This is a BLE limitation.
 
-`write`: look in the [Usage](#usage) section for a `writeLarge` function you can use to solve this issue.
+`write (with response)`: look in the [Usage](#usage) section for functions you can use to solve this issue.
 
 **3. the characeristic does not support writeWithoutResponse**
 

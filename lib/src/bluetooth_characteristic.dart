@@ -1,74 +1,112 @@
-// Copyright 2023, Charles Weinberger & Paul DeMarco.
+// Copyright 2017-2023, Charles Weinberger & Paul DeMarco.
 // All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
 part of flutter_blue_plus;
+
+final Guid cccdUuid = Guid("00002902-0000-1000-8000-00805f9b34fb");
 
 class BluetoothCharacteristic {
   final DeviceIdentifier remoteId;
   final Guid serviceUuid;
   final Guid? secondaryServiceUuid;
   final Guid characteristicUuid;
-  final CharacteristicProperties properties;
-  final List<BluetoothDescriptor> descriptors;
 
-  // convenience accessor
-  Guid get uuid => characteristicUuid;
-
-  /// this variable is updated:
-  ///   - *live* if you call onValueReceived.listen() or lastValueStream.listen() & setNotifyValue(true)
-  ///   - *once* if you call read()
-  List<int> lastValue;
+  BluetoothCharacteristic({
+    required this.remoteId,
+    required this.serviceUuid,
+    this.secondaryServiceUuid,
+    required this.characteristicUuid,
+  });
 
   BluetoothCharacteristic.fromProto(BmBluetoothCharacteristic p)
       : remoteId = DeviceIdentifier(p.remoteId.toString()),
         serviceUuid = p.serviceUuid,
         secondaryServiceUuid = p.secondaryServiceUuid != null ? p.secondaryServiceUuid! : null,
-        characteristicUuid = p.characteristicUuid,
-        descriptors = p.descriptors.map((d) => BluetoothDescriptor.fromProto(d)).toList(),
-        properties = CharacteristicProperties.fromProto(p.properties),
-        lastValue = p.value;
+        characteristicUuid = p.characteristicUuid;
 
-  // same as onValueReceived, but the stream immediately starts
-  // with lastValue as its first value to not cause delay
-  Stream<List<int>> get lastValueStream => onValueReceived.newStreamWithInitialValue(lastValue);
+  /// convenience accessor
+  Guid get uuid => characteristicUuid;
 
-  // this stream is updated:
-  //   - after read() is called
-  //   - when a notification arrives
+  /// convenience accessor
+  BluetoothDevice get device => BluetoothDevice(remoteId: remoteId);
+
+  /// Get Properties from known services
+  CharacteristicProperties get properties {
+    return _bmchr != null ? CharacteristicProperties.fromProto(_bmchr!.properties) : CharacteristicProperties();
+  }
+
+  /// Get Descriptors from known services
+  List<BluetoothDescriptor> get descriptors {
+    return _bmchr != null ? _bmchr!.descriptors.map((d) => BluetoothDescriptor.fromProto(d)).toList() : [];
+  }
+
+  /// this variable is updated:
+  ///   - anytime `read()` is called
+  ///   - anytime `write()` is called
+  ///   - anytime a notification arrives (if subscribed)
+  List<int> get lastValue {
+    String key = "$serviceUuid:$characteristicUuid";
+    return FlutterBluePlus._lastChrs[remoteId]?[key] ?? [];
+  }
+
+  /// this stream emits values:
+  ///   - anytime `read()` is called
+  ///   - anytime `write()` is called
+  ///   - anytime a notification arrives (if subscribed)
+  ///   - and when first listened to, it re-emits the last value for convenience
+  Stream<List<int>> get lastValueStream => FlutterBluePlus._methodStream.stream
+      .where((m) => m.method == "OnCharacteristicReceived" || m.method == "OnCharacteristicWritten")
+      .map((m) => m.arguments)
+      .map((args) => BmCharacteristicData.fromMap(args))
+      .where((p) => p.remoteId == remoteId.toString())
+      .where((p) => p.serviceUuid == serviceUuid)
+      .where((p) => p.characteristicUuid == characteristicUuid)
+      .where((p) => p.success == true)
+      .map((c) => c.value)
+      .newStreamWithInitialValue(lastValue);
+
+  /// this stream emits values:
+  ///   - anytime `read()` is called
+  ///   - anytime a notification arrives (if subscribed)
   Stream<List<int>> get onValueReceived => FlutterBluePlus._methodStream.stream
-          .where((m) => m.method == "OnCharacteristicReceived")
-          .map((m) => m.arguments)
-          .map((args) => BmOnCharacteristicReceived.fromMap(args))
-          .where((p) => p.remoteId == remoteId.toString())
-          .where((p) => p.serviceUuid == serviceUuid)
-          .where((p) => p.characteristicUuid == characteristicUuid)
-          .where((p) => p.success == true)
-          .map((c) {
-        lastValue = c.value; // Update cache of lastValue
-        return c.value;
-      });
+      .where((m) => m.method == "OnCharacteristicReceived")
+      .map((m) => m.arguments)
+      .map((args) => BmCharacteristicData.fromMap(args))
+      .where((p) => p.remoteId == remoteId.toString())
+      .where((p) => p.serviceUuid == serviceUuid)
+      .where((p) => p.characteristicUuid == characteristicUuid)
+      .where((p) => p.success == true)
+      .map((c) => c.value);
 
+  /// return true if we're subscribed to this characteristic
+  ///   -  you can subscribe using setNotifyValue(true)
   bool get isNotifying {
-    try {
-      var cccd = descriptors.singleWhere((d) => d.descriptorUuid == BluetoothDescriptor.cccd);
-      var hasNotify = cccd.lastValue.isNotEmpty && (cccd.lastValue[0] & 0x01) > 0;
-      var hasIndicate = cccd.lastValue.isNotEmpty && (cccd.lastValue[0] & 0x02) > 0;
-      return hasNotify || hasIndicate;
-    } catch (e) {
+    var cccd = descriptors._firstWhereOrNull((d) => d.descriptorUuid == cccdUuid);
+    if (cccd == null) {
       return false;
     }
+    var hasNotify = cccd.lastValue.isNotEmpty && (cccd.lastValue[0] & 0x01) > 0;
+    var hasIndicate = cccd.lastValue.isNotEmpty && (cccd.lastValue[0] & 0x02) > 0;
+    return hasNotify || hasIndicate;
   }
 
   /// read a characteristic
   Future<List<int>> read({int timeout = 15}) async {
-    List<int> responseValue = [];
+    // check connected
+    if (device.isConnected == false) {
+      throw FlutterBluePlusException(
+          ErrorPlatform.dart, "readCharacteristic", FbpErrorCode.deviceIsDisconnected.index, "device is not connected");
+    }
 
     // Only allows a single read to be underway at any time, per-characteristic, per-device.
     // Otherwise, there would be multiple in-flight reads and we wouldn't know which response is which.
     String key = remoteId.str + ":" + characteristicUuid.toString() + ":readChr";
     _Mutex readMutex = await _MutexFactory.getMutexForKey(key);
     await readMutex.take();
+
+    // return value
+    List<int> responseValue = [];
 
     try {
       var request = BmReadCharacteristicRequest(
@@ -81,25 +119,27 @@ class BluetoothCharacteristic {
       var responseStream = FlutterBluePlus._methodStream.stream
           .where((m) => m.method == "OnCharacteristicReceived")
           .map((m) => m.arguments)
-          .map((args) => BmOnCharacteristicReceived.fromMap(args))
+          .map((args) => BmCharacteristicData.fromMap(args))
           .where((p) => p.remoteId == request.remoteId)
           .where((p) => p.serviceUuid == request.serviceUuid)
           .where((p) => p.characteristicUuid == request.characteristicUuid);
 
       // Start listening now, before invokeMethod, to ensure we don't miss the response
-      Future<BmOnCharacteristicReceived> futureResponse = responseStream.first;
+      Future<BmCharacteristicData> futureResponse = responseStream.first;
 
+      // invoke
       await FlutterBluePlus._invokeMethod('readCharacteristic', request.toMap());
 
-      BmOnCharacteristicReceived response = await futureResponse.fbpTimeout(timeout, "readCharacteristic");
+      // wait for response
+      BmCharacteristicData response = await futureResponse
+          .fbpEnsureAdapterIsOn("readCharacteristic")
+          .fbpEnsureDeviceIsConnected(device, "readCharacteristic")
+          .fbpTimeout(timeout, "readCharacteristic");
 
       // failed?
       if (!response.success) {
         throw FlutterBluePlusException(_nativeError, "readCharacteristic", response.errorCode, response.errorString);
       }
-
-      // cache latest value
-      lastValue = response.value;
 
       // set return value
       responseValue = response.value;
@@ -113,7 +153,25 @@ class BluetoothCharacteristic {
   /// Writes a characteristic.
   ///  - [withoutResponse]: the write is not guaranteed and always returns immediately with success.
   ///  - [withResponse]: the write returns error on failure
-  Future<void> write(List<int> value, {bool withoutResponse = false, int timeout = 15}) async {
+  ///  - [allowLongWrite]: if set, larger writes > MTU are allowed (up to 512 bytes).
+  ///       This should be used with caution.
+  ///         1. it can only be used *with* response
+  ///         2. the peripheral device must support the 'long write' ble protocol.
+  ///         3. Interrupted transfers can leave the characteristic in a partially written state
+  ///         4. If the mtu is small, it is very very slow.
+  Future<void> write(List<int> value,
+      {bool withoutResponse = false, bool allowLongWrite = false, int timeout = 15}) async {
+    //  check args
+    if (withoutResponse && allowLongWrite) {
+      throw ArgumentError("cannot longWrite withoutResponse, not allowed on iOS or Android");
+    }
+
+    // check connected
+    if (device.isConnected == false) {
+      throw FlutterBluePlusException(ErrorPlatform.dart, "writeCharacteristic", FbpErrorCode.deviceIsDisconnected.index,
+          "device is not connected");
+    }
+
     // Only allows a single write to be underway at any time, per-characteristic, per-device.
     // Otherwise, there would be multiple in-flight writes and we wouldn't know which response is which.
     String key = remoteId.str + ":" + characteristicUuid.toString() + ":writeChr";
@@ -139,26 +197,31 @@ class BluetoothCharacteristic {
         serviceUuid: serviceUuid,
         secondaryServiceUuid: null,
         writeType: writeType,
+        allowLongWrite: allowLongWrite,
         value: value,
       );
 
       var responseStream = FlutterBluePlus._methodStream.stream
           .where((m) => m.method == "OnCharacteristicWritten")
           .map((m) => m.arguments)
-          .map((args) => BmOnCharacteristicWritten.fromMap(args))
+          .map((args) => BmCharacteristicData.fromMap(args))
           .where((p) => p.remoteId == request.remoteId)
           .where((p) => p.serviceUuid == request.serviceUuid)
           .where((p) => p.characteristicUuid == request.characteristicUuid);
 
       // Start listening now, before invokeMethod, to ensure we don't miss the response
-      Future<BmOnCharacteristicWritten> futureResponse = responseStream.first;
+      Future<BmCharacteristicData> futureResponse = responseStream.first;
 
+      // invoke
       await FlutterBluePlus._invokeMethod('writeCharacteristic', request.toMap());
 
       // wait for response so that we can:
       //  1. check for success (writeWithResponse)
       //  2. wait until the packet has been sent, to prevent iOS & Android dropping packets (writeWithoutResponse)
-      BmOnCharacteristicWritten response = await futureResponse.fbpTimeout(timeout, "writeCharacteristic");
+      BmCharacteristicData response = await futureResponse
+          .fbpEnsureAdapterIsOn("writeCharacteristic")
+          .fbpEnsureDeviceIsConnected(device, "writeCharacteristic")
+          .fbpTimeout(timeout, "writeCharacteristic");
 
       // failed?
       if (!response.success) {
@@ -178,57 +241,75 @@ class BluetoothCharacteristic {
   ///   - If a characteristic supports both notifications and indications,
   ///     we'll use notifications. This is a limitation of CoreBluetooth on iOS.
   Future<bool> setNotifyValue(bool notify, {int timeout = 15}) async {
-    var request = BmSetNotificationRequest(
-      remoteId: remoteId.toString(),
-      serviceUuid: serviceUuid,
-      secondaryServiceUuid: null,
-      characteristicUuid: characteristicUuid,
-      enable: notify,
-    );
-
-    // Notifications & Indications are configured by writing to the
-    // Client Characteristic Configuration Descriptor (CCCD)
-    Stream<BmOnDescriptorResponse> responseStream = FlutterBluePlus._methodStream.stream
-        .where((m) => m.method == "OnDescriptorResponse")
-        .map((m) => m.arguments)
-        .map((args) => BmOnDescriptorResponse.fromMap(args))
-        .where((p) => p.type == BmOnDescriptorResponseType.write)
-        .where((p) => p.remoteId == request.remoteId)
-        .where((p) => p.serviceUuid == request.serviceUuid)
-        .where((p) => p.characteristicUuid == request.characteristicUuid)
-        .where((p) => p.descriptorUuid == BluetoothDescriptor.cccd);
-
-    // Start listening now, before invokeMethod, to ensure we don't miss the response
-    Future<BmOnDescriptorResponse> futureResponse = responseStream.first;
-
-    await FlutterBluePlus._invokeMethod('setNotification', request.toMap());
-
-    // wait for response, so that we can check for success
-    BmOnDescriptorResponse response = await futureResponse.fbpTimeout(timeout, "setNotifyValue");
-
-    // failed?
-    if (!response.success) {
-      throw FlutterBluePlusException(_nativeError, "setNotifyValue", response.errorCode, response.errorString);
-    }
-
-    // verify notifications were actually set correctly
-    var cccd = response.value;
-    var hasNotify = cccd.isNotEmpty && (cccd[0] & 0x01) > 0;
-    var hasIndicate = cccd.isNotEmpty && (cccd[0] & 0x02) > 0;
-    var isEnabled = hasNotify || hasIndicate;
-    if (notify != isEnabled) {
+    // check connected
+    if (device.isConnected == false) {
       throw FlutterBluePlusException(
-          ErrorPlatform.dart, "setNotifyValue", FbpErrorCode.setNotifyFailed.index, "notifications were not updated");
+          ErrorPlatform.dart, "setNotifyValue", FbpErrorCode.deviceIsDisconnected.index, "device is not connected");
     }
 
-    // update descriptor
-    for (var d in descriptors) {
-      if (d.uuid == BluetoothDescriptor.cccd) {
-        d.lastValue = response.value;
+    // Only allow a single descriptor write to be underway at any time, per-characteristic, per-device.
+    // Otherwise, there would be multiple in-flight requests and we wouldn't know which response is for us.
+    String key = remoteId.str + ":" + characteristicUuid.toString() + ":writeDesc";
+    _Mutex writeMutex = await _MutexFactory.getMutexForKey(key);
+    await writeMutex.take();
+
+    try {
+      var request = BmSetNotifyValueRequest(
+        remoteId: remoteId.toString(),
+        serviceUuid: serviceUuid,
+        secondaryServiceUuid: null,
+        characteristicUuid: characteristicUuid,
+        enable: notify,
+      );
+
+      // Notifications & Indications are configured by writing to the
+      // Client Characteristic Configuration Descriptor (CCCD)
+      Stream<BmDescriptorData> responseStream = FlutterBluePlus._methodStream.stream
+          .where((m) => m.method == "OnDescriptorWritten")
+          .map((m) => m.arguments)
+          .map((args) => BmDescriptorData.fromMap(args))
+          .where((p) => p.remoteId == request.remoteId)
+          .where((p) => p.serviceUuid == request.serviceUuid)
+          .where((p) => p.characteristicUuid == request.characteristicUuid)
+          .where((p) => p.descriptorUuid == cccdUuid);
+
+      // Start listening now, before invokeMethod, to ensure we don't miss the response
+      Future<BmDescriptorData> futureResponse = responseStream.first;
+
+      // invoke
+      bool hasCCCD = await FlutterBluePlus._invokeMethod('setNotifyValue', request.toMap());
+
+      // wait for CCCD descriptor to be written?
+      if (hasCCCD) {
+        BmDescriptorData response = await futureResponse
+            .fbpEnsureAdapterIsOn("setNotifyValue")
+            .fbpEnsureDeviceIsConnected(device, "setNotifyValue")
+            .fbpTimeout(timeout, "setNotifyValue");
+
+        // failed?
+        if (!response.success) {
+          throw FlutterBluePlusException(_nativeError, "setNotifyValue", response.errorCode, response.errorString);
+        }
+      }
+    } finally {
+      writeMutex.give();
+    }
+
+    return true;
+  }
+
+  /// look through known services
+  BmBluetoothCharacteristic? get _bmchr {
+    if (FlutterBluePlus._knownServices[remoteId] != null) {
+      for (var s in FlutterBluePlus._knownServices[remoteId]!.services) {
+        for (var c in s.characteristics) {
+          if (c.characteristicUuid == uuid) {
+            return c;
+          }
+        }
       }
     }
-
-    return notify == isEnabled;
+    return null;
   }
 
   @override
