@@ -77,7 +77,7 @@ class BmAdvertisementData {
     // Construct the BmAdvertisementData
     return BmAdvertisementData(
       localName: json['local_name'],
-      connectable: json['connectable'],
+      connectable: json['connectable'] != 0 || json['connectable'] != false,
       txPowerLevel: json['tx_power_level'],
       manufacturerData: manufacturerData,
       serviceData: serviceData,
