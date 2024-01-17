@@ -45,6 +45,7 @@ class BluetoothCharacteristic {
   ///   - anytime `read()` is called
   ///   - anytime `write()` is called
   ///   - anytime a notification arrives (if subscribed)
+  ///   - when the device is disconnected it is cleared
   List<int> get lastValue {
     String key = "$serviceUuid:$characteristicUuid";
     return FlutterBluePlus._lastChrs[remoteId]?[key] ?? [];
@@ -96,14 +97,12 @@ class BluetoothCharacteristic {
     // check connected
     if (device.isConnected == false) {
       throw FlutterBluePlusException(
-          ErrorPlatform.dart, "readCharacteristic", FbpErrorCode.deviceIsDisconnected.index, "device is not connected");
+          ErrorPlatform.fbp, "readCharacteristic", FbpErrorCode.deviceIsDisconnected.index, "device is not connected");
     }
 
-    // Only allows a single read to be underway at any time, per-characteristic, per-device.
-    // Otherwise, there would be multiple in-flight reads and we wouldn't know which response is which.
-    String key = remoteId.str + ":" + characteristicUuid.toString() + ":readChr";
-    _Mutex readMutex = await _MutexFactory.getMutexForKey(key);
-    await readMutex.take();
+    // Only allow a single ble operation to be underway at a time
+    _Mutex mtx = _MutexFactory.getMutexForKey("global");
+    await mtx.take();
 
     // return value
     List<int> responseValue = [];
@@ -144,7 +143,7 @@ class BluetoothCharacteristic {
       // set return value
       responseValue = response.value;
     } finally {
-      readMutex.give();
+      mtx.give();
     }
 
     return responseValue;
@@ -168,25 +167,13 @@ class BluetoothCharacteristic {
 
     // check connected
     if (device.isConnected == false) {
-      throw FlutterBluePlusException(ErrorPlatform.dart, "writeCharacteristic", FbpErrorCode.deviceIsDisconnected.index,
-          "device is not connected");
+      throw FlutterBluePlusException(
+          ErrorPlatform.fbp, "writeCharacteristic", FbpErrorCode.deviceIsDisconnected.index, "device is not connected");
     }
 
-    // Only allows a single write to be underway at any time, per-characteristic, per-device.
-    // Otherwise, there would be multiple in-flight writes and we wouldn't know which response is which.
-    String key = remoteId.str + ":" + characteristicUuid.toString() + ":writeChr";
-    _Mutex writeMutex = await _MutexFactory.getMutexForKey(key);
-    await writeMutex.take();
-
-    // edge case: In order to avoid dropped packets, whenever we do a writeWithoutResponse, we
-    // wait for the device to say it is ready for more again before we return from this function,
-    // that way the next time we call write(writeWithoutResponse:true) we know the device is already
-    // ready and will not drop the packet. This 'ready' signal is per-device, so we can only have
-    // 1 writeWithoutResponse request in-flight at a time, per device.
-    _Mutex deviceReady = await _MutexFactory.getMutexForKey(remoteId.str + ":withoutResp");
-    if (withoutResponse) {
-      await deviceReady.take();
-    }
+    // Only allow a single ble operation to be underway at a time
+    _Mutex mtx = _MutexFactory.getMutexForKey("global");
+    await mtx.take();
 
     try {
       final writeType = withoutResponse ? BmWriteType.withoutResponse : BmWriteType.withResponse;
@@ -230,28 +217,29 @@ class BluetoothCharacteristic {
 
       return Future.value();
     } finally {
-      writeMutex.give();
-      if (withoutResponse) {
-        deviceReady.give();
-      }
+      mtx.give();
     }
   }
 
   /// Sets notifications or indications for the characteristic.
   ///   - If a characteristic supports both notifications and indications,
-  ///     we'll use notifications. This is a limitation of CoreBluetooth on iOS.
-  Future<bool> setNotifyValue(bool notify, {int timeout = 15}) async {
+  ///     we use notifications. This is a limitation of CoreBluetooth on iOS.
+  ///   - [forceIndications] Android Only. force indications to be used instead of notifications.
+  Future<bool> setNotifyValue(bool notify, {int timeout = 15, bool forceIndications = false}) async {
     // check connected
     if (device.isConnected == false) {
       throw FlutterBluePlusException(
-          ErrorPlatform.dart, "setNotifyValue", FbpErrorCode.deviceIsDisconnected.index, "device is not connected");
+          ErrorPlatform.fbp, "setNotifyValue", FbpErrorCode.deviceIsDisconnected.index, "device is not connected");
     }
 
-    // Only allow a single descriptor write to be underway at any time, per-characteristic, per-device.
-    // Otherwise, there would be multiple in-flight requests and we wouldn't know which response is for us.
-    String key = remoteId.str + ":" + characteristicUuid.toString() + ":writeDesc";
-    _Mutex writeMutex = await _MutexFactory.getMutexForKey(key);
-    await writeMutex.take();
+    // check
+    if (Platform.isMacOS || Platform.isIOS) {
+      assert(forceIndications == false, "iOS & macOS do not support forcing indications");
+    }
+
+    // Only allow a single ble operation to be underway at a time
+    _Mutex mtx = _MutexFactory.getMutexForKey("global");
+    await mtx.take();
 
     try {
       var request = BmSetNotifyValueRequest(
@@ -259,6 +247,7 @@ class BluetoothCharacteristic {
         serviceUuid: serviceUuid,
         secondaryServiceUuid: null,
         characteristicUuid: characteristicUuid,
+        forceIndications: forceIndications,
         enable: notify,
       );
 
@@ -292,7 +281,7 @@ class BluetoothCharacteristic {
         }
       }
     } finally {
-      writeMutex.give();
+      mtx.give();
     }
 
     return true;
@@ -302,9 +291,11 @@ class BluetoothCharacteristic {
   BmBluetoothCharacteristic? get _bmchr {
     if (FlutterBluePlus._knownServices[remoteId] != null) {
       for (var s in FlutterBluePlus._knownServices[remoteId]!.services) {
-        for (var c in s.characteristics) {
-          if (c.characteristicUuid == uuid) {
-            return c;
+        if (s.serviceUuid == serviceUuid) {
+          for (var c in s.characteristics) {
+            if (c.characteristicUuid == uuid) {
+              return c;
+            }
           }
         }
       }

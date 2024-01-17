@@ -33,7 +33,7 @@ i.e. `FlutterBluePlus.instance.startScan` becomes `FlutterBluePlus.startScan`
 
 ## 1.11.0
 
-* **renamed:** `connectedDevices` -> `systemDevices`
+* **renamed:** `connectedDevices` -> `connectedSystemDevices`
 
 ## 1.15.0
 
@@ -57,7 +57,7 @@ extension Scan on FlutterBluePlus {
     final controller = StreamController<ScanResult>();
 
     var subscription = FlutterBluePlus.scanResults.listen(
-      (r) => controller.add(r.first),
+      (r){if(r.isNotEmpty){controller.add(r.first);}},
       onError: (e, stackTrace) => controller.addError(e, stackTrace),
     );
 
@@ -90,7 +90,7 @@ extension Scan on FlutterBluePlus {
 ```
 Stream<BluetoothDevice?> myDeviceStream = FlutterBluePlus.scanResults
     .map((list) => list.first)
-    .where((r) => r.advertisementData.localName == "myDeviceName")
+    .where((r) => r.advertisementData.advName == "myDeviceName")
     .map((r) => r.device);
 
 // start listening before we call startScan so we do not miss the result
@@ -153,26 +153,6 @@ await FlutterBluePlus.startScan(timeout: Duration(seconds:15));
 await FlutterBluePlus.isScanning.where((value) => value == false).first;
 ```
 
-### `FlutterBluePlus.startScan` doesn't support macAddress filtering anymore
-
-You can easily filter by mac address yourself. 
-
-```
-Stream<BluetoothDevice?> myDeviceStream = FlutterBluePlus.scanResults
-    .map((list) => list.where(device) => device.remoteId == Guid("be6e0363-906a-4af6-9417-4b6085eb2e94"))
-    .where((list) => list.isNotEmpty)
-    .map((list) => list.first)
-
-// start listening before we call startScan so we do not miss the result
-Future<BluetoothDevice?> myDeviceFuture = myDeviceStream.first
-    .timeout(Duration(seconds: 10))
-    .catchError((error) => null);
-
-await FlutterBluePlus.startScan(timeout: Duration(seconds: 10));
-
-BluetoothDevice? myDevice = await myDeviceFuture;
-```
-
 ## 1.16.0
 
 * **renamed:** `BluetoothDevice.localName` -> `platformName`
@@ -193,4 +173,40 @@ BluetoothDevice? myDevice = await myDeviceFuture;
 
 ## 1.20.3
 
-* **new function:** Introduced a new `connectedDevices` function. **Caution:** a previous function used the same name. That older function is now called `systemDevices`.
+ **Caution:** this release introduces a new function called `connectedDevices`. Before `1.11.0`, there used to be a function with this same name. That older function has since been renamed to `systemDevices`.
+
+## 1.21.0
+
+* **Behavior Change:** only allow a single ble operation at a time.
+
+This change was made to increase reliability, at the cost of throughput.
+
+## 1.22.0
+
+* **Breaking Change:** on android, we now request an mtu of 512 by default during connection.
+
+## 1.22.1 to 1.26.0
+These releases changed multiple things but then changed them back. For brevity, here are the actual changes:
+* **[Behavior Change]** android: always listen to Services Changed characteristic, to match iOS behavior
+* **[Rename]** `device.onServicesChanged` -> `device.onServicesReset`
+* **[Remove]** `device.onNameChanged`, in favor of only exposing `events.onNameChanged`
+* **[Rename]** events api: most functions & classes were renamed for consistency
+
+## 1.27.0
+
+* **[Breaking Change]** scanning: `continousUpdates` is now false by default - it is not typically needed & hurts perf. 
+
+If your app uses `startScan.removeIfGone`, or your app continually checks the value of `scanResult.timestamp` or `scanResult.rssi`, then you will need to explicitly set `continousUpdates` to true.
+
+## 1.27.2
+
+* **[Rename]** `advertisementData.localName` -> `advertisementData.advName`
+
+## 1.28.0
+
+* **[Breaking Change]** `guid.toString()` now returns 16-bit short uuid when possibe
+* **[Breaking Change]** use GUID for `advertisingData.serviceUuids` & `advertisingData.serviceData` instead of String
+
+## 1.29.0
+
+* **[Breaking Change]** scanResults: do not clear results after `stopScan`. If you want results cleared, use `onScanResults` instead.

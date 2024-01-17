@@ -6,6 +6,7 @@ package com.lib.flutter_blue_plus;
 
 import android.Manifest;
 import android.annotation.TargetApi;
+import android.app.Activity;
 import android.app.Application;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
@@ -72,11 +73,13 @@ import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 import io.flutter.plugin.common.PluginRegistry.RequestPermissionsResultListener;
+import io.flutter.plugin.common.PluginRegistry.ActivityResultListener;
 
 public class FlutterBluePlusPlugin implements
     FlutterPlugin,
     MethodCallHandler,
     RequestPermissionsResultListener,
+    ActivityResultListener,
     ActivityAware
 {
     private static final String TAG = "[FBP-Android]";
@@ -89,19 +92,26 @@ public class FlutterBluePlusPlugin implements
 
     private BluetoothManager mBluetoothManager;
     private BluetoothAdapter mBluetoothAdapter;
+    private boolean mIsScanning = false;
 
     private FlutterPluginBinding pluginBinding;
     private ActivityPluginBinding activityBinding;
 
-    static final private String CCCD = "00002902-0000-1000-8000-00805f9b34fb";
+    static final private String CCCD = "2902";
 
     private final Map<String, BluetoothGatt> mConnectedDevices = new ConcurrentHashMap<>();
+    private final Map<String, BluetoothGatt> mCurrentlyConnectingDevices = new ConcurrentHashMap<>();
+    private final Map<String, BluetoothDevice> mBondingDevices = new ConcurrentHashMap<>();
     private final Map<String, Integer> mMtu = new ConcurrentHashMap<>();
-    private final Map<String, Boolean> mAutoConnect = new ConcurrentHashMap<>();
+    private final Map<String, Boolean> mAutoConnected = new ConcurrentHashMap<>();
     private final Map<String, String> mWriteChr = new ConcurrentHashMap<>();
     private final Map<String, String> mWriteDesc = new ConcurrentHashMap<>();
-    private int lastEventId = 1452;
+    private final Map<String, String> mAdvSeen = new ConcurrentHashMap<>();
+    private final Map<String, Integer> mScanCounts = new ConcurrentHashMap<>();
+    private HashMap<String, Object> mScanFilters = new HashMap<String, Object>();
+    
     private final Map<Integer, OperationOnPermission> operationsOnPermission = new HashMap<>();
+    private int lastEventId = 1452;
 
     private final int enableBluetoothRequestCode = 1879842617;
 
@@ -111,25 +121,53 @@ public class FlutterBluePlusPlugin implements
 
     public FlutterBluePlusPlugin() {}
 
-    public String uuid128(UUID obj)
+    // returns 128-bit representation
+    public String uuid128(Object uuid)
     {
-        String uuid = obj.toString();
+        if (!(uuid instanceof UUID) && !(uuid instanceof String)) {
+            throw new IllegalArgumentException("input must be UUID or String");
+        }
 
-        if (uuid.length() == 4)
+        String s = uuid.toString();
+
+        if (s.length() == 4)
         {
             // 16-bit uuid
-            return String.format("0000%s-0000-1000-8000-00805F9B34FB", uuid).toLowerCase();
-        }
-        else if (uuid.length() == 8)
+            return String.format("0000%s-0000-1000-8000-00805f9b34fb", s).toLowerCase();
+        } 
+        else if (s.length() == 8)
         {
             // 32-bit uuid
-            return String.format("%s-0000-1000-8000-00805F9B34FB", uuid).toLowerCase();
+            return String.format("%s-0000-1000-8000-00805f9b34fb", s).toLowerCase();
         }
         else
         {
             // 128-bit uuid
-            return uuid.toLowerCase();
+            return s.toLowerCase();
         }
+    }
+
+    // returns shortest representation
+    public String uuidStr(Object uuid)
+    {
+        String s = uuid128(uuid);
+        boolean starts = s.startsWith("0000");
+        boolean ends = s.endsWith("-0000-1000-8000-00805f9b34fb");
+        if (starts && ends)
+        {   
+            // 16-bit
+            return s.substring(4,8);
+        }
+        else if (ends) 
+        {
+            // 32-bit
+                return s.substring(0,8);
+        } 
+        else 
+        {
+            // 128-bit
+            return s;
+        }    
     }
 
     @Override
@@ -156,7 +194,18 @@ public class FlutterBluePlusPlugin implements
     {
         log(LogLevel.DEBUG, "onDetachedFromEngine");
 
+        invokeMethodUIThread("OnDetachedFromEngine", new HashMap<>());
+
         pluginBinding = null;
+
+        // stop scanning
+        if (mBluetoothAdapter != null && mIsScanning) {
+            BluetoothLeScanner scanner = mBluetoothAdapter.getBluetoothLeScanner();
+            if (scanner != null) {
+                scanner.stopScan(getScanCallback());
+                mIsScanning = false;
+            }
+        }
 
         disconnectAllDevices("onDetachedFromEngine");
 
@@ -177,6 +226,7 @@ public class FlutterBluePlusPlugin implements
         log(LogLevel.DEBUG, "onAttachedToActivity");
         activityBinding = binding;
         activityBinding.addRequestPermissionsResultListener(this);
+        activityBinding.addActivityResultListener(this);
     }
 
     @Override
@@ -229,9 +279,9 @@ public class FlutterBluePlusPlugin implements
                 mBluetoothAdapter = mBluetoothManager != null ? mBluetoothManager.getAdapter() : null;
             }
 
-            // check that we have an adapter, except for
+            // check that we have an adapter, except for 
             // the functions that do not need it
-            if(mBluetoothAdapter == null &&
+            if(mBluetoothAdapter == null && 
                 "flutterHotRestart".equals(call.method) == false &&
                 "connectedCount".equals(call.method) == false &&
                 "setLogLevel".equals(call.method) == false &&
@@ -252,9 +302,11 @@ public class FlutterBluePlusPlugin implements
                         break;
                     }
 
+                    // stop scanning
                     BluetoothLeScanner scanner = mBluetoothAdapter.getBluetoothLeScanner();
-                    if(scanner != null) {
+                    if(scanner != null && mIsScanning) {
                         scanner.stopScan(getScanCallback());
+                        mIsScanning = false;
                     }
 
                     disconnectAllDevices("flutterHotRestart");
@@ -292,11 +344,6 @@ public class FlutterBluePlusPlugin implements
                     break;
                 }
 
-                case "isLeExtendedAdvertisingSupported": {
-                    result.success(mBluetoothAdapter.isLeExtendedAdvertisingSupported());
-                    break;
-                }
-
                case "getAdapterName":
                 {
                     ArrayList<String> permissions = new ArrayList<>();
@@ -317,6 +364,12 @@ public class FlutterBluePlusPlugin implements
                     });
                     break;
                 }
+
+                case "isLeExtendedAdvertisingSupported": {
+                    result.success(mBluetoothAdapter.isLeExtendedAdvertisingSupported());
+                    break;
+                }
+
                 case "getLeMaximumAdvertisingDataLength": {
                     int getLeMaximumAdvertisingDataLength = mBluetoothAdapter.getLeMaximumAdvertisingDataLength();
                     result.success(getLeMaximumAdvertisingDataLength);
@@ -325,7 +378,7 @@ public class FlutterBluePlusPlugin implements
 
                 case "getAdapterState":
                 {
-                    // get adapterState, if we can
+                    // get adapterState, if we have permission
                     int adapterState = -1; // unknown
                     try {
                         adapterState = mBluetoothAdapter.getState();
@@ -360,7 +413,7 @@ public class FlutterBluePlusPlugin implements
                         }
 
                         if (mBluetoothAdapter.isEnabled()) {
-                            result.success(true); // no work to do
+                            result.success(false); // no work to do
                             return;
                         }
 
@@ -410,19 +463,23 @@ public class FlutterBluePlusPlugin implements
 
                 case "startScan":
                 {
-                    ArrayList<String> permissions = new ArrayList<>();
-
                     // see: BmScanSettings
                     HashMap<String, Object> data = call.arguments();
-                    List<String> serviceUuids = (List<String>) data.get("service_uuids");
-                    List<String> macAddresses = (List<String>) data.get("mac_addresses");
-                    boolean allowDuplicates =        (boolean) data.get("allow_duplicates");
-                    int scanMode =                       (int) data.get("android_scan_mode");
-                    boolean usesFineLocation =       (boolean) data.get("android_uses_fine_location");
+                    List<String> withServices =    (List<String>) data.get("with_services");
+                    List<String> withRemoteIds =   (List<String>) data.get("with_remote_ids");
+                    List<String> withNames =       (List<String>) data.get("with_names");
+                    List<String> withKeywords =    (List<String>) data.get("with_keywords");
+                    List<Object> withMsd =         (List<Object>) data.get("with_msd");
+                    List<Object> withServiceData = (List<Object>) data.get("with_service_data");
+                    boolean continuousUpdates =         (boolean) data.get("continuous_updates");
+                    int androidScanMode =                   (int) data.get("android_scan_mode");
+                    boolean androidUsesFineLocation =   (boolean) data.get("android_uses_fine_location");
+
+                    ArrayList<String> permissions = new ArrayList<>();
 
                     if (Build.VERSION.SDK_INT >= 31) { // Android 12 (October 2021)
                         permissions.add(Manifest.permission.BLUETOOTH_SCAN);
-                        if (usesFineLocation) {
+                        if (androidUsesFineLocation) {
                             permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
                         }
                         // it is unclear why this is needed, but some phones throw a
@@ -437,44 +494,110 @@ public class FlutterBluePlusPlugin implements
                     ensurePermissions(permissions, (granted, perm) -> {
 
                         if (granted == false) {
-                            result.error("startScan",
+                            result.error("startScan", 
                                 String.format("FlutterBluePlus requires %s permission", perm), null);
                             return;
                         }
 
+                        // check adapter
+                        if (isAdapterOn() == false) {
+                            result.error("startScan", String.format("bluetooth must be turned on"), null);
+                            return;
+                        }
+
+                        // get scanner
                         BluetoothLeScanner scanner = mBluetoothAdapter.getBluetoothLeScanner();
                         if(scanner == null) {
                             result.error("startScan", String.format("getBluetoothLeScanner() is null. Is the Adapter on?"), null);
                             return;
                         }
 
-                        ScanSettings settings;
+                        // build scan settings
+                        ScanSettings.Builder builder = new ScanSettings.Builder();
+                        builder.setScanMode(androidScanMode);
                         if (Build.VERSION.SDK_INT >= 26) { // Android 8.0 (August 2017)
-                            settings = new ScanSettings.Builder()
-                                .setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED)
-                                .setLegacy(false)
-                                .setScanMode(scanMode)
-                                .build();
-                        } else {
-                            settings = new ScanSettings.Builder()
-                                .setScanMode(scanMode).build();
+                            builder.setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED);
+                            builder.setLegacy(false);
                         }
-
+                        ScanSettings settings = builder.build();
+                        
+                        // set filters
                         List<ScanFilter> filters = new ArrayList<>();
 
-                        for (int i = 0; i < macAddresses.size(); i++) {
-                            String macAddress = macAddresses.get(i);
-                            ScanFilter f = new ScanFilter.Builder().setDeviceAddress(macAddress).build();
+                        // services
+                        for (int i = 0; i < withServices.size(); i++) {
+                            ParcelUuid s = ParcelUuid.fromString(uuid128(withServices.get(i)));
+                            ScanFilter f = new ScanFilter.Builder().setServiceUuid(s).build();
+                            filters.add(f);
+                        }
+                        
+                        // remoteIds
+                        for (int i = 0; i < withRemoteIds.size(); i++) {
+                            String address = withRemoteIds.get(i);
+                            ScanFilter f = new ScanFilter.Builder().setDeviceAddress(address).build();
                             filters.add(f);
                         }
 
-                        for (int i = 0; i < serviceUuids.size(); i++) {
-                            String uuid = serviceUuids.get(i);
-                            ScanFilter f = new ScanFilter.Builder().setServiceUuid(ParcelUuid.fromString(uuid)).build();
+                        // names
+                        for (int i = 0; i < withNames.size(); i++) {
+                            String name = withNames.get(i);
+                            ScanFilter f = new ScanFilter.Builder().setDeviceName(name).build();
                             filters.add(f);
                         }
+
+                        // keywords
+                        if (Build.VERSION.SDK_INT >= 33) { // Android 13 (August 2022)
+                            if (withKeywords.size() > 0) {
+                                // device must advertise a name
+                                int a1 = ScanRecord.DATA_TYPE_LOCAL_NAME_SHORT;
+                                int a2 = ScanRecord.DATA_TYPE_LOCAL_NAME_COMPLETE;
+                                ScanFilter f1 = new ScanFilter.Builder().setAdvertisingDataType(a1).build();
+                                ScanFilter f2 = new ScanFilter.Builder().setAdvertisingDataType(a2).build();
+                                filters.add(f1);
+                                filters.add(f2);
+                            }
+                        }
+
+                        // msd
+                        for (int i = 0; i < withMsd.size(); i++) {
+                            HashMap<String, Object> m = (HashMap<String, Object>) withMsd.get(i);
+                            int id =                    (int) m.get("manufacturer_id");
+                            byte[] mdata = hexToBytes((String) m.get("data"));
+                            byte[] mask =  hexToBytes((String) m.get("mask"));
+                            ScanFilter f = null;
+                            if (mask.length == 0) {
+                                f = new ScanFilter.Builder().setManufacturerData(id, mdata).build();
+                            } else {
+                                f = new ScanFilter.Builder().setManufacturerData(id, mdata, mask).build();
+                            }
+                            filters.add(f);
+                        }
+
+                        // service data
+                        for (int i = 0; i < withServiceData.size(); i++) {
+                            HashMap<String, Object> m = (HashMap<String, Object>) withServiceData.get(i);
+                            ParcelUuid s = ParcelUuid.fromString((String) m.get("service"));
+                            byte[] mdata =             hexToBytes((String) m.get("data"));
+                            byte[] mask =              hexToBytes((String) m.get("mask"));
+                            ScanFilter f = null;
+                            if (mask.length == 0) {
+                                f = new ScanFilter.Builder().setServiceData(s, mdata).build();
+                            } else {
+                                f = new ScanFilter.Builder().setServiceData(s, mdata, mask).build();
+                            }
+                            filters.add(f);
+                        }
+
+                        // remember for later
+                        mScanFilters = data;
+
+                        // clear seen devices
+                        mAdvSeen.clear();
+                        mScanCounts.clear();
 
                         scanner.startScan(filters, settings, getScanCallback());
+
+                        mIsScanning = true;
 
                         result.success(true);
                     });
@@ -487,6 +610,7 @@ public class FlutterBluePlusPlugin implements
 
                     if(scanner != null) {
                         scanner.stopScan(getScanCallback());
+                        mIsScanning = false;
                     }
 
                     result.success(true);
@@ -517,6 +641,7 @@ public class FlutterBluePlusPlugin implements
                             devList.add(bmBluetoothDevice(d));
                         }
 
+                        // See: BmDevicesList
                         HashMap<String, Object> response = new HashMap<>();
                         response.put("devices", devList);
 
@@ -527,6 +652,11 @@ public class FlutterBluePlusPlugin implements
 
                 case "connect":
                 {
+                    // see: BmConnectRequest
+                    HashMap<String, Object> args = call.arguments();
+                    String remoteId =    (String) args.get("remote_id");
+                    boolean autoConnect = ((int) args.get("auto_connect")) != 0;
+
                     ArrayList<String> permissions = new ArrayList<>();
 
                     if (Build.VERSION.SDK_INT >= 31) { // Android 12 (October 2021)
@@ -541,23 +671,31 @@ public class FlutterBluePlusPlugin implements
                             return;
                         }
 
-                        // see: BmConnectRequest
-                        HashMap<String, Object> args = call.arguments();
-                        String remoteId =  (String)  args.get("remote_id");
-                        boolean autoConnect = ((int) args.get("auto_connect")) != 0;
-
-                        // remember autoconnect
-                        mAutoConnect.put(remoteId, autoConnect);
-
-                        // already connected?
-                        BluetoothGatt gatt = mConnectedDevices.get(remoteId);
-                        if (gatt != null) {
-                            log(LogLevel.DEBUG, "already connected");
-                            result.success(false);  // no work to do
+                        // check adapter
+                        if (isAdapterOn() == false) {
+                            result.error("connect", String.format("bluetooth must be turned on"), null);
                             return;
                         }
 
-                        // connect with new gatt
+                        // already connecting?
+                        if (mCurrentlyConnectingDevices.get(remoteId) != null) {
+                            log(LogLevel.DEBUG, "already connecting");
+                            result.success(true);  // still work to do
+                            return;
+                        } 
+
+                        // already connected?
+                        if (mConnectedDevices.get(remoteId) != null) {
+                            log(LogLevel.DEBUG, "already connected");
+                            result.success(false);  // no work to do
+                            return;
+                        } 
+
+                        // wait if any device is bonding (increases reliability)
+                        waitIfBonding();
+
+                        // connect
+                        BluetoothGatt gatt = null;
                         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(remoteId);
                         if (Build.VERSION.SDK_INT >= 23) { // Android 6.0 (October 2015)
                             gatt = device.connectGatt(context, autoConnect, mGattCallback, BluetoothDevice.TRANSPORT_LE);
@@ -571,6 +709,16 @@ public class FlutterBluePlusPlugin implements
                             return;
                         }
 
+                        // add to currently connecting peripherals
+                        mCurrentlyConnectingDevices.put(remoteId, gatt);
+
+                        // remember autoconnect 
+                        if (autoConnect) {
+                            mAutoConnected.put(remoteId, autoConnect);
+                        } else {
+                            mAutoConnected.remove(remoteId);
+                        }
+
                         result.success(true);
                     });
                     break;
@@ -581,7 +729,16 @@ public class FlutterBluePlusPlugin implements
                     String remoteId = (String) call.arguments;
 
                     // already disconnected?
-                    BluetoothGatt gatt = mConnectedDevices.get(remoteId);
+                    BluetoothGatt gatt = null;
+                    if (gatt == null) {
+                        gatt = mCurrentlyConnectingDevices.get(remoteId);
+                        if (gatt != null) {
+                            log(LogLevel.DEBUG, "disconnect: cancelling connection in progress");
+                        }
+                    }
+                    if (gatt == null) {
+                        gatt = mConnectedDevices.get(remoteId);;
+                    }
                     if (gatt == null) {
                         log(LogLevel.DEBUG, "already disconnected");
                         result.success(false);  // no work to do
@@ -590,9 +747,29 @@ public class FlutterBluePlusPlugin implements
 
                     // calling disconnect explicitly turns off autoconnect.
                     // this allows gatt resources to be reclaimed
-                    mAutoConnect.put(remoteId, false);
-
+                    mAutoConnected.remove(remoteId);
+                
+                    // disconnect
                     gatt.disconnect();
+
+                    // was connecting?
+                    if (mCurrentlyConnectingDevices.get(remoteId) != null) {
+
+                        // remove
+                        mCurrentlyConnectingDevices.remove(remoteId);
+
+                        // cleanup
+                        gatt.close();
+
+                        // see: BmConnectionStateResponse
+                        HashMap<String, Object> response = new HashMap<>();
+                        response.put("remote_id", remoteId);
+                        response.put("connection_state", bmConnectionStateEnum(BluetoothProfile.STATE_DISCONNECTED));
+                        response.put("disconnect_reason_code", 23789258); // random value
+                        response.put("disconnect_reason_string", "connection canceled");
+
+                        invokeMethodUIThread("OnConnectionStateChanged", response);
+                    }
 
                     result.success(true);
                     break;
@@ -608,6 +785,9 @@ public class FlutterBluePlusPlugin implements
                         result.error("discoverServices", "device is disconnected", null);
                         break;
                     }
+
+                    // wait if any device is bonding (increases reliability)
+                    waitIfBonding();
 
                     // discover services
                     if(gatt.discoverServices() == false) {
@@ -634,6 +814,9 @@ public class FlutterBluePlusPlugin implements
                         result.error("readCharacteristic", "device is disconnected", null);
                         break;
                     }
+
+                    // wait if any device is bonding (increases reliability)
+                    waitIfBonding();
 
                     // find characteristic
                     ChrFound found = locateCharacteristic(gatt, serviceUuid, secondaryServiceUuid, characteristicUuid);
@@ -685,6 +868,9 @@ public class FlutterBluePlusPlugin implements
                         break;
                     }
 
+                    // wait if any device is bonding (increases reliability)
+                    waitIfBonding();
+
                     // find characteristic
                     ChrFound found = locateCharacteristic(gatt, serviceUuid, secondaryServiceUuid, characteristicUuid);
                     if (found.error != null) {
@@ -713,11 +899,10 @@ public class FlutterBluePlusPlugin implements
                     int maxLen = getMaxPayload(remoteId, writeType, allowLongWrite);
                     int dataLen = hexToBytes(value).length;
                     if (dataLen > maxLen) {
-                        String t = writeTypeInt == 0 ? "withResponse" : "withoutResponse";
-                        String a = allowLongWrite ? ", allowLongWrite" : ", noLongWrite";
-                        String b = writeTypeInt == 0 ? a : "";
-                        String s = "data longer than allowed. dataLen: " + dataLen + " > max: " + maxLen + " (" + t + b +")";
-                        result.error("writeCharacteristic", s, null);
+                        String a = writeTypeInt == 0 ? "withResponse" : "withoutResponse";
+                        String b = writeTypeInt == 0 ? (allowLongWrite ? ", allowLongWrite" : ", noLongWrite") : "";
+                        String str = "data longer than allowed. dataLen: " + dataLen + " > max: " + maxLen + " (" + a + b +")";
+                        result.error("writeCharacteristic", str, null);
                         break;
                     }
 
@@ -774,6 +959,9 @@ public class FlutterBluePlusPlugin implements
                         break;
                     }
 
+                    // wait if any device is bonding (increases reliability)
+                    waitIfBonding();
+
                     // find characteristic
                     ChrFound found = locateCharacteristic(gatt, serviceUuid, secondaryServiceUuid, characteristicUuid);
                     if (found.error != null) {
@@ -818,6 +1006,9 @@ public class FlutterBluePlusPlugin implements
                         result.error("writeDescriptor", "device is disconnected", null);
                         break;
                     }
+
+                    // wait if any device is bonding (increases reliability)
+                    waitIfBonding();
 
                     // find characteristic
                     ChrFound found = locateCharacteristic(gatt, serviceUuid, secondaryServiceUuid, characteristicUuid);
@@ -886,6 +1077,7 @@ public class FlutterBluePlusPlugin implements
                     String serviceUuid =          (String) data.get("service_uuid");
                     String secondaryServiceUuid = (String) data.get("secondary_service_uuid");
                     String characteristicUuid =   (String) data.get("characteristic_uuid");
+                    boolean forceIndications =   (boolean) data.get("force_indications");
                     boolean enable =             (boolean) data.get("enable");
 
                     // check connection
@@ -894,6 +1086,9 @@ public class FlutterBluePlusPlugin implements
                         result.error("setNotifyValue", "device is disconnected", null);
                         break;
                     }
+
+                    // wait if any device is bonding (increases reliability)
+                    waitIfBonding();
 
                     // find characteristic
                     ChrFound found = locateCharacteristic(gatt, serviceUuid, secondaryServiceUuid, characteristicUuid);
@@ -917,7 +1112,7 @@ public class FlutterBluePlusPlugin implements
                         // Some ble devices do not actually need their CCCD updated.
                         // thus setCharacteristicNotification() is all that is required to enable notifications.
                         // The arduino "bluno" devices are an example.
-                        String uuid = uuid128(characteristic.getUuid());
+                        String uuid = uuidStr(characteristic.getUuid());
                         log(LogLevel.WARNING, "CCCD descriptor for characteristic not found: " + uuid);
                         result.success(false);
                         return;
@@ -937,10 +1132,17 @@ public class FlutterBluePlusPlugin implements
                             break;
                         }
 
+                        if (forceIndications && !canIndicate) {
+                            result.error("setNotifyValue","INDICATE not supported by this BLE characteristic", null);
+                            break;
+                        }
+
                         // If a characteristic supports both notifications and indications,
-                        // we'll use notifications. This matches how CoreBluetooth works on iOS.
-                        if(canIndicate) {descriptorValue = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE;}
-                        if(canNotify)   {descriptorValue = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE;}
+                        // we use notifications. This matches how CoreBluetooth works on iOS.
+                        // Except of course, if forceIndications is enabled.
+                        if(canIndicate)      {descriptorValue = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE;}
+                        if(canNotify)        {descriptorValue = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE;}
+                        if(forceIndications) {descriptorValue = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE;}
 
                     } else {
                         descriptorValue  = BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE;
@@ -993,6 +1195,9 @@ public class FlutterBluePlusPlugin implements
                         break;
                     }
 
+                    // wait if any device is bonding (increases reliability)
+                    waitIfBonding();
+
                     // request mtu
                     if(gatt.requestMtu(mtu) == false) {
                         result.error("requestMtu", "gatt.requestMtu() returned false", null);
@@ -1013,6 +1218,9 @@ public class FlutterBluePlusPlugin implements
                         result.error("readRssi", "device is disconnected", null);
                         break;
                     }
+
+                    // wait if any device is bonding (increases reliability)
+                    waitIfBonding();
 
                     // read rssi
                     if(gatt.readRemoteRssi() == false) {
@@ -1037,6 +1245,9 @@ public class FlutterBluePlusPlugin implements
                         result.error("requestConnectionPriority", "device is disconnected", null);
                         break;
                     }
+
+                    // wait if any device is bonding (increases reliability)
+                    waitIfBonding();
 
                     int cpInteger = bmConnectionPriorityParse(connectionPriority);
 
@@ -1090,6 +1301,9 @@ public class FlutterBluePlusPlugin implements
                         result.error("setPreferredPhy", "device is disconnected", null);
                         break;
                     }
+
+                    // wait if any device is bonding (increases reliability)
+                    waitIfBonding();
 
                     // set preferred phy
                     gatt.setPreferredPhy(txPhy, rxPhy, phyOptions);
@@ -1148,6 +1362,13 @@ public class FlutterBluePlusPlugin implements
                     if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
                         log(LogLevel.WARNING, "already bonded");
                         result.success(false); // no work to do
+                        break;
+                    }
+
+                    // bonding already in progress?
+                    if (device.getBondState() == BluetoothDevice.BOND_BONDING) {
+                        log(LogLevel.WARNING, "bonding already in progress");
+                        result.success(true); // caller must wait for bond completion
                         break;
                     }
 
@@ -1222,6 +1443,36 @@ public class FlutterBluePlusPlugin implements
             result.error("androidException", e.toString(), stackTrace);
             return;
         }
+    }
+
+   //////////////////////////////////////////////////////////////////////
+   //  █████    ██████  ████████  ██  ██    ██  ██  ████████  ██    ██ 
+   // ██   ██  ██          ██     ██  ██    ██  ██     ██      ██  ██  
+   // ███████  ██          ██     ██  ██    ██  ██     ██       ████   
+   // ██   ██  ██          ██     ██   ██  ██   ██     ██        ██    
+   // ██   ██   ██████     ██     ██    ████    ██     ██        ██    
+   // 
+   // ██████   ███████  ███████  ██    ██  ██       ████████ 
+   // ██   ██  ██       ██       ██    ██  ██          ██    
+   // ██████   █████    ███████  ██    ██  ██          ██    
+   // ██   ██  ██            ██  ██    ██  ██          ██    
+   // ██   ██  ███████  ███████   ██████   ███████     ██    
+
+    @Override
+    public boolean onActivityResult(int requestCode, int resultCode, Intent data)
+    {
+        if (requestCode == enableBluetoothRequestCode) {
+
+            // see: BmTurnOnResponse
+            HashMap<String, Object> map = new HashMap<>();
+            map.put("user_accepted", resultCode == Activity.RESULT_OK);
+
+            invokeMethodUIThread("OnTurnOnResponse", map);
+
+            return true;
+        }
+
+        return false; // did not handle anything
     }
 
     //////////////////////////////////////////////////////////////////////////////////////
@@ -1307,6 +1558,20 @@ public class FlutterBluePlusPlugin implements
     // ██    ██     ██     ██  ██            ██
     //  ██████      ██     ██  ███████  ███████
 
+    private void waitIfBonding() {
+        int counter = 0;
+        if (mBondingDevices.isEmpty() == false) {
+            if (counter == 0) {
+                log(LogLevel.DEBUG, "[FBP] waiting for bonding to complete...");
+            }
+            try{Thread.sleep(50);}catch(Exception e){}
+            counter++;
+        }
+        if (counter > 0) {
+            log(LogLevel.DEBUG, "[FBP] bonding completed");
+        }
+    }
+
     class ChrFound {
         public BluetoothGattCharacteristic characteristic;
         public String error;
@@ -1343,7 +1608,7 @@ public class FlutterBluePlusPlugin implements
         // characteristic
         BluetoothGattCharacteristic characteristic = getCharacteristicFromArray(characteristicId, service.getCharacteristics());
         if(characteristic == null) {
-            return new ChrFound(null, "characteristic not found in service " +
+            return new ChrFound(null, "characteristic not found in service " + 
                 "(chr: '" + characteristicId + "' svc: '" + serviceId + "')");
         }
 
@@ -1353,7 +1618,7 @@ public class FlutterBluePlusPlugin implements
     private BluetoothGattService getServiceFromArray(String uuid, List<BluetoothGattService> array)
     {
         for (BluetoothGattService s : array) {
-            if (uuid128(s.getUuid()).equals(uuid)) {
+            if (uuid128(s.getUuid()).equals(uuid128(uuid))) {
                 return s;
             }
         }
@@ -1363,7 +1628,7 @@ public class FlutterBluePlusPlugin implements
     private BluetoothGattCharacteristic getCharacteristicFromArray(String uuid, List<BluetoothGattCharacteristic> array)
     {
         for (BluetoothGattCharacteristic c : array) {
-            if (uuid128(c.getUuid()).equals(uuid)) {
+            if (uuid128(c.getUuid()).equals(uuid128(uuid))) {
                 return c;
             }
         }
@@ -1373,20 +1638,35 @@ public class FlutterBluePlusPlugin implements
     private BluetoothGattDescriptor getDescriptorFromArray(String uuid, List<BluetoothGattDescriptor> array)
     {
         for (BluetoothGattDescriptor d : array) {
-            if (uuid128(d.getUuid()).equals(uuid)) {
+            if (uuid128(d.getUuid()).equals(uuid128(uuid))) {
                 return d;
             }
         }
         return null;
     }
 
+    private boolean filterKeywords(List<String> keywords, String target) {
+        if (keywords.isEmpty()) {
+            return true;
+        }
+        if (target == null) {
+            return false;
+        }
+        for (String k : keywords) {
+            if (target.contains(k)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private int getMaxPayload(String remoteId, int writeType, boolean allowLongWrite)
     {
-        // 512 this comes from the BLE spec. Characteritics should not
+        // 512 this comes from the BLE spec. Characteritics should not 
         // be longer than 512. Android also enforces this as the maximum in internal code.
-        int maxAttrLen = 512;
+        int maxAttrLen = 512; 
 
-        // if no response, we can only write up to MTU-3.
+        // if no response, we can only write up to MTU-3. 
         // This is the same limitation as iOS, and ensures transfer reliability.
         if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE || allowLongWrite == false) {
 
@@ -1410,44 +1690,39 @@ public class FlutterBluePlusPlugin implements
 
         // request disconnections
         for (BluetoothGatt gatt : mConnectedDevices.values()) {
-            if(gatt != null) {
-                String remoteId = gatt.getDevice().getAddress();
 
+            if (func == "adapterTurnOff") {
+
+                // Note: 
+                //  - calling `disconnect` and `close` after the adapter
+                //    is turned off is not necessary. It is implied.
+                //    Calling them leads to a `DeadObjectException`.
+                //  - But, we must make sure the disconnect callback is called.
+                //    It's surprising but android does not invoke this callback itself.
+                mGattCallback.onConnectionStateChange(gatt, 0, BluetoothProfile.STATE_DISCONNECTED);
+
+            } else {
+
+                String remoteId = gatt.getDevice().getAddress();
+                
                 // disconnect
                 log(LogLevel.DEBUG, "calling disconnect: " + remoteId);
                 gatt.disconnect();
 
-                // callback
-                if (func == "adapterTurnOff") {
-                    // make sure disconnect callback is called.
-                    // for some reason android does not always call this
-                    mGattCallback.onConnectionStateChange(gatt, 0, BluetoothProfile.STATE_DISCONNECTED);
-                }
-
-                // not autoconnected?
-                boolean notAutoConnected = mAutoConnect.get(remoteId) == false;
-
-                // close
-                if (func == "flutterHotRestart" ||
-                    func == "onDetachedFromEngine" ||
-                    (func == "adapterTurnOff" && notAutoConnected))
-                {
-                    // it is important to close after disconnection, otherwise we will
-                    // quickly run out of bluetooth resources, preventing new connections
-                    log(LogLevel.DEBUG, "calling close: " + remoteId);
-                    gatt.close();
-                } else {
-                    // we cannot close autoConnected devices
-                    // because this stops autoConnect from working
-                    log(LogLevel.DEBUG, "skipping close (autoConnect): " + remoteId);
-                }
+                // it is important to close after disconnection, otherwise we will 
+                // quickly run out of bluetooth resources, preventing new connections
+                log(LogLevel.DEBUG, "calling close: " + remoteId);
+                gatt.close();
             }
         }
 
         mConnectedDevices.clear();
+        mCurrentlyConnectingDevices.clear();
+        mBondingDevices.clear();
         mMtu.clear();
         mWriteChr.clear();
         mWriteDesc.clear();
+        mAutoConnected.clear();
     }
 
     /////////////////////////////////////////////////////////////////////////////////////
@@ -1479,19 +1754,19 @@ public class FlutterBluePlusPlugin implements
 
             log(LogLevel.DEBUG, "OnAdapterStateChanged: " + adapterStateString(adapterState));
 
-            // close all connections
+            // disconnect all devices
             if (adapterState == BluetoothAdapter.STATE_TURNING_OFF || 
                 adapterState == BluetoothAdapter.STATE_OFF) {
                 disconnectAllDevices("adapterTurnOff");
             }
-
+            
             // see: BmBluetoothAdapterState
             HashMap<String, Object> map = new HashMap<>();
             map.put("adapter_state", bmAdapterStateEnum(adapterState));
 
             invokeMethodUIThread("OnAdapterStateChanged", map);
         }
-    };
+    };   
 
     /////////////////////////////////////////////////////////////////////////////////////
     // ██████    ██████   ███    ██  ██████
@@ -1535,6 +1810,13 @@ public class FlutterBluePlusPlugin implements
 
             String remoteId = device.getAddress();
 
+            // remember which devices are currently bonding
+            if (cur == BluetoothDevice.BOND_BONDING) {
+                mBondingDevices.put(remoteId, device);
+            } else {
+                mBondingDevices.remove(remoteId);
+            }
+
             // see: BmBondStateResponse
             HashMap<String, Object> map = new HashMap<>();
             map.put("remote_id", remoteId);
@@ -1560,6 +1842,13 @@ public class FlutterBluePlusPlugin implements
 
     private ScanCallback scanCallback;
 
+    private int scanCountIncrement(String remoteId) {
+        if (mScanCounts.get(remoteId) == null) {mScanCounts.put(remoteId, 0);}
+        int count = mScanCounts.get(remoteId);
+        mScanCounts.put(remoteId, count+1);
+        return count;
+    }
+
     private ScanCallback getScanCallback()
     {
         if(scanCallback == null) {
@@ -1567,6 +1856,7 @@ public class FlutterBluePlusPlugin implements
             scanCallback = new ScanCallback()
             {
                 @Override
+                @SuppressWarnings("unchecked") // type safety uses bluetooth_msgs.dart
                 public void onScanResult(int callbackType, ScanResult result)
                 {
                     log(LogLevel.VERBOSE, "onScanResult");
@@ -1575,13 +1865,37 @@ public class FlutterBluePlusPlugin implements
 
                     BluetoothDevice device = result.getDevice();
                     String remoteId = device.getAddress();
+                    ScanRecord scanRecord = result.getScanRecord();
+                    String advHex = scanRecord != null ? bytesToHex(scanRecord.getBytes()) : "";
 
-                    // see BmScanResult
-                    HashMap<String, Object> sr = bmScanResult(device, result);
+                    // filter duplicates
+                    if (((boolean) mScanFilters.get("continuous_updates")) == false) {
+                        boolean isDuplicate = mAdvSeen.containsKey(remoteId) && mAdvSeen.get(remoteId).equals(advHex);
+                        mAdvSeen.put(remoteId, advHex); // remember
+                        if (isDuplicate) {
+                            return;
+                        }
+                    }
+
+                    // filter keywords
+                    String name = scanRecord != null ? scanRecord.getDeviceName() : "";
+                    List<String> keywords = (List<String>) mScanFilters.get("with_keywords");
+                    if (filterKeywords(keywords, name) == false) {
+                        return;
+                    }
+
+                    // filter divisor
+                    if (((boolean) mScanFilters.get("continuous_updates")) != false) {
+                        int count = scanCountIncrement(remoteId);   
+                        int divisor = (int) mScanFilters.get("continuous_divisor");
+                        if ((count % divisor) != 0) {
+                            return;
+                        }
+                    }
 
                     // see BmScanResponse
                     HashMap<String, Object> response = new HashMap<>();
-                    response.put("result", sr);
+                    response.put("advertisements", Arrays.asList(bmScanAdvertisement(device, result)));
 
                     invokeMethodUIThread("OnScanResponse", response);
                 }
@@ -1599,15 +1913,12 @@ public class FlutterBluePlusPlugin implements
 
                     super.onScanFailed(errorCode);
 
-                    // see: BmScanFailed
-                    HashMap<String, Object> failed = new HashMap<>();
-                    failed.put("success", 0);
-                    failed.put("error_code", errorCode);
-                    failed.put("error_string", scanFailedString(errorCode));
-
                     // see BmScanResponse
                     HashMap<String, Object> response = new HashMap<>();
-                    response.put("failed", failed);
+                    response.put("advertisements", new ArrayList<>());
+                    response.put("success", 0);
+                    response.put("error_code", errorCode);
+                    response.put("error_string", scanFailedString(errorCode));
 
                     invokeMethodUIThread("OnScanResponse", response);
                 }
@@ -1634,9 +1945,8 @@ public class FlutterBluePlusPlugin implements
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState)
         {
-            log(LogLevel.DEBUG, "onConnectionStateChange: status: " + status +
-                " (" + hciStatusString(status) + ")" +
-                " newState: " + connectionStateString(newState));
+            log(LogLevel.DEBUG, "onConnectionStateChange:" + connectionStateString(newState));
+            log(LogLevel.DEBUG, "  status: " + hciStatusString(status));
 
             // android never uses this callback with enums values of CONNECTING or DISCONNECTING,
             // (theyre only used for gatt.getConnectionState()), but just to be
@@ -1653,6 +1963,9 @@ public class FlutterBluePlusPlugin implements
                 // add to connected devices
                 mConnectedDevices.put(remoteId, gatt);
 
+                // remove from currently connecting devices
+                mCurrentlyConnectingDevices.remove(remoteId);
+
                 // default minimum mtu
                 mMtu.put(remoteId, 23);
             }
@@ -1663,14 +1976,20 @@ public class FlutterBluePlusPlugin implements
                 // remove from connected devices
                 mConnectedDevices.remove(remoteId);
 
-                // we cannot call 'close' for autoconnect
+                // remove from currently connecting devices
+                mCurrentlyConnectingDevices.remove(remoteId);
+
+                // remove from currently bonding devices
+                mBondingDevices.remove(remoteId);
+
+                // we cannot call 'close' for autoconnected devices
                 // because it prevents autoconnect from working
-                if (mAutoConnect.get(remoteId) == null || mAutoConnect.get(remoteId) == false) {
-                    // it is important to close after disconnection, otherwise we will
+                if (mAutoConnected.containsKey(remoteId)) {
+                    log(LogLevel.DEBUG, "autoconnect is true. skipping gatt.close()");
+                } else {
+                    // it is important to close after disconnection, otherwise we will 
                     // quickly run out of bluetooth resources, preventing new connections
                     gatt.close();
-                } else {
-                    log(LogLevel.DEBUG, "autoconnect is true. skipping gatt.close()");
                 }
             }
 
@@ -1687,7 +2006,10 @@ public class FlutterBluePlusPlugin implements
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status)
         {
-            log(LogLevel.DEBUG, "onServicesDiscovered: count: " + gatt.getServices().size() + " status: " + status);
+            LogLevel level = status == 0 ? LogLevel.DEBUG : LogLevel.ERROR;
+            log(level, "onServicesDiscovered:");
+            log(level, "  count: " + gatt.getServices().size());
+            log(level, "  status: " + status + gattErrorString(status));
 
             List<Object> services = new ArrayList<Object>();
             for(BluetoothGattService s : gatt.getServices()) {
@@ -1702,7 +2024,7 @@ public class FlutterBluePlusPlugin implements
             response.put("error_code", status);
             response.put("error_string", gattErrorString(status));
 
-            invokeMethodUIThread("OnDiscoverServicesResult", response);
+            invokeMethodUIThread("OnDiscoveredServices", response);
         }
 
         // called for both notifications & reads
@@ -1711,28 +2033,23 @@ public class FlutterBluePlusPlugin implements
             ServicePair pair = getServicePair(gatt, characteristic);
 
             // GATT Service?
-            if (uuid128(pair.primary) == "00001800-0000-1000-8000-00805F9B34FB") {
-
-                // name changed
-                if (uuid128(characteristic.getUuid()) == "00002A00-0000-1000-8000-00805F9B34FB") {
-                    HashMap<String, Object> response = bmBluetoothDevice(gatt.getDevice());
-                    response.put("platform_name", new String(value, StandardCharsets.UTF_8));
-                    invokeMethodUIThread("OnNameChanged", response);
-                }
+            if (uuidStr(pair.primary) == "1800") {
 
                 // services changed
-                if (uuid128(characteristic.getUuid()) == "00002A05-0000-1000-8000-00805F9B34FB") {
+                if (uuidStr(characteristic.getUuid()) == "2A05") {
                     HashMap<String, Object> response = bmBluetoothDevice(gatt.getDevice());
-                    invokeMethodUIThread("OnServicesChanged", response);
+                    invokeMethodUIThread("OnServicesReset", response);
                 }
             }
 
             // see: BmCharacteristicData
             HashMap<String, Object> response = new HashMap<>();
             response.put("remote_id", gatt.getDevice().getAddress());
-            response.put("service_uuid", uuid128(pair.primary));
-            response.put("secondary_service_uuid", pair.secondary != null ? uuid128(pair.secondary) : null);
-            response.put("characteristic_uuid", uuid128(characteristic.getUuid()));
+            response.put("service_uuid", uuidStr(pair.primary));
+            if (pair.secondary != null) {
+                response.put("secondary_service_uuid", uuidStr(pair.secondary));
+            }
+            response.put("characteristic_uuid", uuidStr(characteristic.getUuid()));
             response.put("value", bytesToHex(value));
             response.put("success", status == BluetoothGatt.GATT_SUCCESS ? 1 : 0);
             response.put("error_code", status);
@@ -1746,7 +2063,9 @@ public class FlutterBluePlusPlugin implements
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value)
         {
             // this callback is only for notifications & indications
-            log(LogLevel.DEBUG, "onCharacteristicChanged: uuid: " + uuid128(characteristic.getUuid()));
+            LogLevel level = LogLevel.DEBUG;
+            log(level, "onCharacteristicChanged:");
+            log(level, "  chr: " + uuidStr(characteristic.getUuid()));
             onCharacteristicReceived(gatt, characteristic, value, BluetoothGatt.GATT_SUCCESS);
         }
 
@@ -1755,27 +2074,33 @@ public class FlutterBluePlusPlugin implements
         public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value, int status)
         {
             // this callback is only for explicit characteristic reads
-            log(LogLevel.DEBUG, "onCharacteristicRead: uuid: " + uuid128(characteristic.getUuid()) + " status: " + status);
+            LogLevel level = status == 0 ? LogLevel.DEBUG : LogLevel.ERROR;
+            log(level, "onCharacteristicRead:");
+            log(level, "  chr: " + uuidStr(characteristic.getUuid()));
+            log(level, "  status: " + gattErrorString(status) + " (" + status + ")");
             onCharacteristicReceived(gatt, characteristic, value, BluetoothGatt.GATT_SUCCESS);
         }
 
         @Override
         public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status)
         {
-            log(LogLevel.DEBUG, "onCharacteristicWrite: uuid: " + uuid128(characteristic.getUuid()) + " status: " + status);
+            LogLevel level = status == 0 ? LogLevel.DEBUG : LogLevel.ERROR;
+            log(level, "onCharacteristicWrite:");
+            log(level, "  chr: " + uuidStr(characteristic.getUuid()));
+            log(level, "  status: " + gattErrorString(status) + " (" + status + ")");
 
-            // For "writeWithResponse", onCharacteristicWrite is called after the remote sends back a write response.
-            // For "writeWithoutResponse", onCharacteristicWrite is called as long as there is still space left
-            // in android's internal buffer. When the buffer is full, it delays calling onCharacteristicWrite
-            // until there is at least ~50% free space again.
+            // For "writeWithResponse", onCharacteristicWrite is called after the remote sends back a write response. 
+            // For "writeWithoutResponse", onCharacteristicWrite is called as long as there is still space left 
+            // in android's internal buffer. When the buffer is full, it delays calling onCharacteristicWrite 
+            // until there is at least ~50% free space again. 
 
             ServicePair pair = getServicePair(gatt, characteristic);
 
             // for convenience
             String remoteId = gatt.getDevice().getAddress();
-            String serviceUuid = uuid128(pair.primary);
-            String secondaryServiceUuid = pair.secondary != null ? uuid128(pair.secondary) : null;
-            String characteristicUuid = uuid128(characteristic.getUuid());
+            String serviceUuid = uuidStr(pair.primary);
+            String secondaryServiceUuid = pair.secondary != null ? uuidStr(pair.secondary) : null;
+            String characteristicUuid = uuidStr(characteristic.getUuid());
 
             // what data did we write?
             String key = remoteId + ":" + serviceUuid + ":" + characteristicUuid;
@@ -1786,7 +2111,9 @@ public class FlutterBluePlusPlugin implements
             HashMap<String, Object> response = new HashMap<>();
             response.put("remote_id", remoteId);
             response.put("service_uuid", serviceUuid);
-            response.put("secondary_service_uuid", secondaryServiceUuid);
+            if (secondaryServiceUuid != null) {
+                response.put("secondary_service_uuid", secondaryServiceUuid);
+            }
             response.put("characteristic_uuid", characteristicUuid);
             response.put("value", value);
             response.put("success", status == BluetoothGatt.GATT_SUCCESS ? 1 : 0);
@@ -1800,17 +2127,23 @@ public class FlutterBluePlusPlugin implements
         @TargetApi(33) // newer function, passes byte[] value
         public void onDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status, byte[] value)
         {
-            log(LogLevel.DEBUG, "onDescriptorRead: uuid: " + uuid128(descriptor.getUuid()) + " status: " + status);
+            LogLevel level = status == 0 ? LogLevel.DEBUG : LogLevel.ERROR;
+            log(level, "onDescriptorRead:");
+            log(level, "  chr: " + uuidStr(descriptor.getCharacteristic().getUuid()));
+            log(level, "  desc: " + uuidStr(descriptor.getUuid()));
+            log(level, "  status: " + gattErrorString(status) + " (" + status + ")");
 
             ServicePair pair = getServicePair(gatt, descriptor.getCharacteristic());
 
             // see: BmDescriptorData
             HashMap<String, Object> response = new HashMap<>();
             response.put("remote_id", gatt.getDevice().getAddress());
-            response.put("service_uuid", uuid128(pair.primary));
-            response.put("secondary_service_uuid", pair.secondary != null ? uuid128(pair.secondary) : null);
-            response.put("characteristic_uuid", uuid128(descriptor.getCharacteristic().getUuid()));
-            response.put("descriptor_uuid", uuid128(descriptor.getUuid()));
+            response.put("service_uuid", uuidStr(pair.primary));
+            if (pair.secondary != null) {
+                response.put("secondary_service_uuid", uuidStr(pair.secondary));
+            }
+            response.put("characteristic_uuid", uuidStr(descriptor.getCharacteristic().getUuid()));
+            response.put("descriptor_uuid", uuidStr(descriptor.getUuid()));
             response.put("value", bytesToHex(value));
             response.put("success", status == BluetoothGatt.GATT_SUCCESS ? 1 : 0);
             response.put("error_code", status);
@@ -1822,16 +2155,20 @@ public class FlutterBluePlusPlugin implements
         @Override
         public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status)
         {
-            log(LogLevel.DEBUG, "onDescriptorWrite: uuid: " + uuid128(descriptor.getUuid()) + " status: " + status);
+            LogLevel level = status == 0 ? LogLevel.DEBUG : LogLevel.ERROR;
+            log(level, "onDescriptorWrite:");
+            log(level, "  chr: " + uuidStr(descriptor.getCharacteristic().getUuid()));
+            log(level, "  desc: " + uuidStr(descriptor.getUuid()));
+            log(level, "  status: " + gattErrorString(status) + " (" + status + ")");
 
             ServicePair pair = getServicePair(gatt, descriptor.getCharacteristic());
 
             // for convenience
             String remoteId = gatt.getDevice().getAddress();
-            String serviceUuid = uuid128(pair.primary);
-            String secondaryServiceUuid = pair.secondary != null ? uuid128(pair.secondary) : null;
-            String characteristicUuid = uuid128(descriptor.getCharacteristic().getUuid());
-            String descriptorUuid = uuid128(descriptor.getUuid());
+            String serviceUuid = uuidStr(pair.primary);
+            String secondaryServiceUuid = pair.secondary != null ? uuidStr(pair.secondary) : null;
+            String characteristicUuid = uuidStr(descriptor.getCharacteristic().getUuid());
+            String descriptorUuid = uuidStr(descriptor.getUuid());
 
             // what data did we write?
             String key = remoteId + ":" + serviceUuid + ":" + characteristicUuid + ":" + descriptorUuid;
@@ -1842,7 +2179,9 @@ public class FlutterBluePlusPlugin implements
             HashMap<String, Object> response = new HashMap<>();
             response.put("remote_id", remoteId);
             response.put("service_uuid", serviceUuid);
-            response.put("secondary_service_uuid", secondaryServiceUuid);
+            if (secondaryServiceUuid != null) {
+                response.put("secondary_service_uuid", secondaryServiceUuid);
+            }
             response.put("characteristic_uuid", characteristicUuid);
             response.put("descriptor_uuid", descriptorUuid);
             response.put("value", value);
@@ -1856,13 +2195,18 @@ public class FlutterBluePlusPlugin implements
         @Override
         public void onReliableWriteCompleted(BluetoothGatt gatt, int status)
         {
-            log(LogLevel.DEBUG, "onReliableWriteCompleted: status: " + status);
+            LogLevel level = status == 0 ? LogLevel.DEBUG : LogLevel.ERROR;
+            log(level, "onReliableWriteCompleted:");
+            log(level, "  status: " + gattErrorString(status) + " (" + status + ")");
         }
 
         @Override
         public void onReadRemoteRssi(BluetoothGatt gatt, int rssi, int status)
         {
-            log(LogLevel.DEBUG, "onReadRemoteRssi: rssi: " + rssi + " status: " + status);
+            LogLevel level = status == 0 ? LogLevel.DEBUG : LogLevel.ERROR;
+            log(level, "onReadRemoteRssi:");
+            log(level, "  rssi: " + rssi);
+            log(level, "  status: " + gattErrorString(status) + " (" + status + ")");
 
             // see: BmReadRssiResult
             HashMap<String, Object> response = new HashMap<>();
@@ -1872,13 +2216,16 @@ public class FlutterBluePlusPlugin implements
             response.put("error_code", status);
             response.put("error_string", gattErrorString(status));
 
-            invokeMethodUIThread("OnReadRssiResult", response);
+            invokeMethodUIThread("OnReadRssi", response);
         }
 
         @Override
         public void onMtuChanged(BluetoothGatt gatt, int mtu, int status)
         {
-            log(LogLevel.DEBUG, "onMtuChanged: mtu: " + mtu + " status: " + status);
+            LogLevel level = status == 0 ? LogLevel.DEBUG : LogLevel.ERROR;
+            log(level, "onMtuChanged:");
+            log(level, "  mtu: " + mtu );
+            log(level, "  status: " + gattErrorString(status) + " (" + status + ")");
 
             String remoteId = gatt.getDevice().getAddress();
 
@@ -1901,18 +2248,18 @@ public class FlutterBluePlusPlugin implements
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic)
         {
             // getValue() was deprecated in API level 33 because the function makes it look like
-            // you could always call getValue on a characteristic. But in reality, this
-            // only works after a *read* has been made
+            // you could always call getValue on a characteristic. But in reality, getValue()
+            // only works after a *read* has been made, not a *write*.
             this.onCharacteristicChanged(gatt, characteristic, characteristic.getValue());
         }
-
+        
         @Override
         @SuppressWarnings("deprecation") // needed for android 12 & lower compatability
         public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status)
         {
             // getValue() was deprecated in API level 33 because the function makes it look like
-            // you could always call getValue on a characteristic. But in reality, this
-            // only works after a *read* has been made
+            // you could always call getValue on a characteristic. But in reality, getValue()
+            // only works after a *read* has been made, not a *write*.
             this.onCharacteristicRead(gatt, characteristic, characteristic.getValue(), status);
         }
 
@@ -1921,7 +2268,7 @@ public class FlutterBluePlusPlugin implements
         public void onDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status)
         {
             // getValue() was deprecated in API level 33 because the api makes it look like
-            // you could always call getValue on a descriptor. But in reality, this
+            // you could always call getValue on a descriptor. But in reality, getValue()
             // only works after a *read* has been made, not a *write*.
             this.onDescriptorRead(gatt, descriptor, status, descriptor.getValue());
         }
@@ -1929,19 +2276,19 @@ public class FlutterBluePlusPlugin implements
     }; // BluetoothGattCallback
 
     //////////////////////////////////////////////////////////////////////
-    // ███    ███  ███████   ██████
-    // ████  ████  ██       ██
-    // ██ ████ ██  ███████  ██   ███
-    // ██  ██  ██       ██  ██    ██
-    // ██      ██  ███████   ██████
-    //
-    // ██   ██  ███████  ██       ██████   ███████  ██████   ███████
-    // ██   ██  ██       ██       ██   ██  ██       ██   ██  ██
-    // ███████  █████    ██       ██████   █████    ██████   ███████
-    // ██   ██  ██       ██       ██       ██       ██   ██       ██
-    // ██   ██  ███████  ███████  ██       ███████  ██   ██  ███████
+    // ███    ███  ███████   ██████      
+    // ████  ████  ██       ██           
+    // ██ ████ ██  ███████  ██   ███     
+    // ██  ██  ██       ██  ██    ██     
+    // ██      ██  ███████   ██████ 
+    //     
+    // ██   ██  ███████  ██       ██████   ███████  ██████   ███████ 
+    // ██   ██  ██       ██       ██   ██  ██       ██   ██  ██      
+    // ███████  █████    ██       ██████   █████    ██████   ███████ 
+    // ██   ██  ██       ██       ██       ██       ██   ██       ██ 
+    // ██   ██  ███████  ███████  ██       ███████  ██   ██  ███████ 
 
-    HashMap<String, Object> bmAdvertisementData(ScanResult result) {
+    HashMap<String, Object> bmScanAdvertisement(BluetoothDevice device, ScanResult result) {
 
         int min = Integer.MIN_VALUE;
 
@@ -1957,7 +2304,7 @@ public class FlutterBluePlusPlugin implements
             connectable = true;
         }
 
-        String                  localName    = adv != null ?  adv.getDeviceName()                : null;
+        String                  advName      = adv != null ?  adv.getDeviceName()                : null;
         int                     txPower      = adv != null ?  adv.getTxPowerLevel()              : min;
         SparseArray<byte[]>     manufData    = adv != null ?  adv.getManufacturerSpecificData()  : null;
         List<ParcelUuid>        serviceUuids = adv != null ?  adv.getServiceUuids()              : null;
@@ -1983,7 +2330,7 @@ public class FlutterBluePlusPlugin implements
             for (Map.Entry<ParcelUuid, byte[]> entry : serviceData.entrySet()) {
                 ParcelUuid key = entry.getKey();
                 byte[] value = entry.getValue();
-                serviceDataB.put(uuid128(key.getUuid()), bytesToHex(value));
+                serviceDataB.put(uuidStr(key.getUuid()), bytesToHex(value));
             }
         }
 
@@ -1991,32 +2338,30 @@ public class FlutterBluePlusPlugin implements
         List<String> serviceUuidsB = new ArrayList<String>();
         if(serviceUuids != null) {
             for (ParcelUuid s : serviceUuids) {
-                serviceUuidsB.add(uuid128(s.getUuid()));
+                serviceUuidsB.add(uuidStr(s.getUuid()));
             }
         }
 
+        // See: BmScanAdvertisement
+        // perf: only add keys if they exists
         HashMap<String, Object> map = new HashMap<>();
-        map.put("local_name",        localName);
-        map.put("connectable",       connectable ? 1 : 0);
-        map.put("tx_power_level",    txPower      != min  ? txPower       : null);
-        map.put("manufacturer_data", manufData    != null ? manufDataB    : null);
-        map.put("service_data",      serviceData  != null ? serviceDataB  : null);
-        map.put("service_uuids",     serviceUuids != null ? serviceUuidsB : null);
+        if (device.getAddress() != null) {map.put("remote_id", device.getAddress());};
+        if (device.getName() != null)    {map.put("platform_name", device.getName());}
+        if (connectable)                 {map.put("connectable", 1);}
+        if (advName != null)             {map.put("adv_name", advName);}
+        if (txPower != min)              {map.put("tx_power_level", txPower);}
+        if (manufData != null)           {map.put("manufacturer_data", manufDataB);}
+        if (serviceData != null)         {map.put("service_data", serviceDataB);}
+        if (serviceUuids != null)        {map.put("service_uuids", serviceUuidsB);}
+        if (result.getRssi() != 0)       {map.put("rssi", result.getRssi());};
         return map;
     }
 
-    HashMap<String, Object> bmScanResult(BluetoothDevice device, ScanResult result) {
-        HashMap<String, Object> map = new HashMap<>();
-        map.put("device", bmBluetoothDevice(device));
-        map.put("rssi", result.getRssi());
-        map.put("advertisement_data", bmAdvertisementData(result));
-        return map;
-    }
-
+    // See: BmBluetoothDevice
     HashMap<String, Object> bmBluetoothDevice(BluetoothDevice device) {
         HashMap<String, Object> map = new HashMap<>();
         map.put("remote_id", device.getAddress());
-        map.put("platform_name", device.getName());
+        map.put("platform_name", device.getName()); 
         return map;
     }
 
@@ -2036,9 +2381,10 @@ public class FlutterBluePlusPlugin implements
             includedServices.add(bmBluetoothService(device, included, gatt));
         }
 
+        // See: BmBluetoothService
         HashMap<String, Object> map = new HashMap<>();
         map.put("remote_id", device.getAddress());
-        map.put("service_uuid", uuid128(service.getUuid()));
+        map.put("service_uuid", uuidStr(service.getUuid()));
         map.put("is_primary", service.getType() == BluetoothGattService.SERVICE_TYPE_PRIMARY ? 1 : 0);
         map.put("characteristics", characteristics);
         map.put("included_services", includedServices);
@@ -2054,25 +2400,30 @@ public class FlutterBluePlusPlugin implements
             descriptors.add(bmBluetoothDescriptor(device, d));
         }
 
+        // See: BmBluetoothCharacteristic
         HashMap<String, Object> map = new HashMap<>();
         map.put("remote_id", device.getAddress());
-        map.put("service_uuid", uuid128(pair.primary));
-        map.put("secondary_service_uuid", pair.secondary != null ? uuid128(pair.secondary) : null);
-        map.put("characteristic_uuid", uuid128(characteristic.getUuid()));
+        map.put("service_uuid", uuidStr(pair.primary));
+        if (pair.secondary != null) {
+            map.put("secondary_service_uuid", uuidStr(pair.secondary));
+        }
+        map.put("characteristic_uuid", uuidStr(characteristic.getUuid()));
         map.put("descriptors", descriptors);
         map.put("properties", bmCharacteristicProperties(characteristic.getProperties()));
         return map;
     }
 
+    // See: BmBluetoothDescriptor
     HashMap<String, Object> bmBluetoothDescriptor(BluetoothDevice device, BluetoothGattDescriptor descriptor) {
         HashMap<String, Object> map = new HashMap<>();
         map.put("remote_id", device.getAddress());
-        map.put("descriptor_uuid", uuid128(descriptor.getUuid()));
-        map.put("characteristic_uuid", uuid128(descriptor.getCharacteristic().getUuid()));
-        map.put("service_uuid", uuid128(descriptor.getCharacteristic().getService().getUuid()));
+        map.put("descriptor_uuid", uuidStr(descriptor.getUuid()));
+        map.put("characteristic_uuid", uuidStr(descriptor.getCharacteristic().getUuid()));
+        map.put("service_uuid", uuidStr(descriptor.getCharacteristic().getService().getUuid()));
         return map;
     }
 
+    // See: BmCharacteristicProperties
     HashMap<String, Object> bmCharacteristicProperties(int properties) {
         HashMap<String, Object> props = new HashMap<>();
         props.put("broadcast",                      (properties & 1)   != 0 ? 1 : 0);
@@ -2088,6 +2439,7 @@ public class FlutterBluePlusPlugin implements
         return props;
     }
 
+    // See: BmConnectionStateEnum
     static int bmConnectionStateEnum(int cs) {
         switch (cs) {
             case BluetoothProfile.STATE_DISCONNECTED:  return 0;
@@ -2096,25 +2448,28 @@ public class FlutterBluePlusPlugin implements
         }
     }
 
+    // See: BmAdapterStateEnum
     static int bmAdapterStateEnum(int as) {
         switch (as) {
             case BluetoothAdapter.STATE_OFF:          return 6;
             case BluetoothAdapter.STATE_ON:           return 4;
             case BluetoothAdapter.STATE_TURNING_OFF:  return 5;
             case BluetoothAdapter.STATE_TURNING_ON:   return 3;
-            default:                                  return 0;
+            default:                                  return 0; 
         }
     }
 
+    // See: BmBondStateEnum
     static int bmBondStateEnum(int bs) {
         switch (bs) {
             case BluetoothDevice.BOND_NONE:    return 0;
             case BluetoothDevice.BOND_BONDING: return 1;
             case BluetoothDevice.BOND_BONDED:  return 2;
-            default:                           return 0;
+            default:                           return 0; 
         }
     }
 
+    // See: BmConnectionPriority
     static int bmConnectionPriorityParse(int value) {
         switch(value) {
             case 0: return BluetoothGatt.CONNECTION_PRIORITY_BALANCED;
@@ -2139,7 +2494,7 @@ public class FlutterBluePlusPlugin implements
         if(service.getType() == BluetoothGattService.SERVICE_TYPE_PRIMARY) {
             result.primary = service.getUuid();
             return result;
-        }
+        } 
 
         // Otherwise, iterate all services until we find the primary service
         for(BluetoothGattService primary : gatt.getServices()) {
@@ -2193,6 +2548,16 @@ public class FlutterBluePlusPlugin implements
                 log(LogLevel.WARNING, "invokeMethodUIThread: tried to call method on closed channel: " + method);
             }
         });
+    }
+
+    private boolean isAdapterOn()
+    {
+        // get adapterState, if we have permission
+        try {
+            return mBluetoothAdapter.getState() == BluetoothAdapter.STATE_ON;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private static byte[] hexToBytes(String s) {
@@ -2250,19 +2615,29 @@ public class FlutterBluePlusPlugin implements
         }
     }
 
+    // Defined in the Bluetooth Standard
     private static String gattErrorString(int value) {
         switch(value) {
-            case BluetoothGatt.GATT_SUCCESS                     : return "GATT_SUCCESS";
-            case BluetoothGatt.GATT_CONNECTION_CONGESTED        : return "GATT_CONNECTION_CONGESTED";
-            case BluetoothGatt.GATT_FAILURE                     : return "GATT_FAILURE";
-            case BluetoothGatt.GATT_INSUFFICIENT_AUTHENTICATION : return "GATT_INSUFFICIENT_AUTHENTICATION";
-            case BluetoothGatt.GATT_INSUFFICIENT_AUTHORIZATION  : return "GATT_INSUFFICIENT_AUTHORIZATION";
-            case BluetoothGatt.GATT_INSUFFICIENT_ENCRYPTION     : return "GATT_INSUFFICIENT_ENCRYPTION";
-            case BluetoothGatt.GATT_INVALID_ATTRIBUTE_LENGTH    : return "GATT_INVALID_ATTRIBUTE_LENGTH";
-            case BluetoothGatt.GATT_INVALID_OFFSET              : return "GATT_INVALID_OFFSET";
-            case BluetoothGatt.GATT_READ_NOT_PERMITTED          : return "GATT_READ_NOT_PERMITTED";
-            case BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED       : return "GATT_REQUEST_NOT_SUPPORTED";
-            case BluetoothGatt.GATT_WRITE_NOT_PERMITTED         : return "GATT_WRITE_NOT_PERMITTED";
+            case BluetoothGatt.GATT_SUCCESS                     : return "GATT_SUCCESS";                     // 0
+            case 0x01                                           : return "GATT_INVALID_HANDLE";              // 1
+            case BluetoothGatt.GATT_READ_NOT_PERMITTED          : return "GATT_READ_NOT_PERMITTED";          // 2
+            case BluetoothGatt.GATT_WRITE_NOT_PERMITTED         : return "GATT_WRITE_NOT_PERMITTED";         // 3
+            case 0x04                                           : return "GATT_INVALID_PDU";                 // 4
+            case BluetoothGatt.GATT_INSUFFICIENT_AUTHENTICATION : return "GATT_INSUFFICIENT_AUTHENTICATION"; // 5
+            case BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED       : return "GATT_REQUEST_NOT_SUPPORTED";       // 6
+            case BluetoothGatt.GATT_INVALID_OFFSET              : return "GATT_INVALID_OFFSET";              // 7
+            case BluetoothGatt.GATT_INSUFFICIENT_AUTHORIZATION  : return "GATT_INSUFFICIENT_AUTHORIZATION";  // 8
+            case 0x09                                           : return "GATT_PREPARE_QUEUE_FULL";          // 9
+            case 0x0a                                           : return "GATT_ATTR_NOT_FOUND";              // 10
+            case 0x0b                                           : return "GATT_ATTR_NOT_LONG";               // 11
+            case 0x0c                                           : return "GATT_INSUFFICIENT_KEY_SIZE";       // 12
+            case BluetoothGatt.GATT_INVALID_ATTRIBUTE_LENGTH    : return "GATT_INVALID_ATTRIBUTE_LENGTH";    // 13
+            case 0x0e                                           : return "GATT_UNLIKELY";                    // 14
+            case BluetoothGatt.GATT_INSUFFICIENT_ENCRYPTION     : return "GATT_INSUFFICIENT_ENCRYPTION";     // 15
+            case 0x10                                           : return "GATT_UNSUPPORTED_GROUP";           // 16
+            case 0x11                                           : return "GATT_INSUFFICIENT_RESOURCES";      // 17
+            case BluetoothGatt.GATT_CONNECTION_CONGESTED        : return "GATT_CONNECTION_CONGESTED";        // 143
+            case BluetoothGatt.GATT_FAILURE                     : return "GATT_FAILURE";                     // 257
             default: return "UNKNOWN_GATT_ERROR (" + value + ")";
         }
     }
@@ -2313,7 +2688,7 @@ public class FlutterBluePlusPlugin implements
             case 0x08: return "CONNECTION_TIMEOUT"; // The link supervision timeout has expired for a given connection.
             case 0x09: return "CONNECTION_LIMIT_EXCEEDED"; // The Controller is already at its limit of the number of connections it can support.
             case 0x0A: return "MAX_NUM_OF_CONNECTIONS_EXCEEDED"; // The Controller has reached the limit of connections
-            case 0x0B: return "CONNECTION_ALREADY_EXISTS"; // A connection to this device already exists
+            case 0x0B: return "CONNECTION_ALREADY_EXISTS"; // A connection to this device already exists 
             case 0x0C: return "COMMAND_DISALLOWED"; // The command requested cannot be executed by the Controller at this time.
             case 0x0D: return "CONNECTION_REJECTED_LIMITED_RESOURCES"; // A connection was rejected due to limited resources.
             case 0x0E: return "CONNECTION_REJECTED_SECURITY_REASONS"; // A connection was rejected due to security, e.g. aauth or pairing.

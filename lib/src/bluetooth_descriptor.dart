@@ -32,6 +32,7 @@ class BluetoothDescriptor {
   /// this variable is updated:
   ///   - anytime `read()` is called
   ///   - anytime `write()` is called
+  ///   - when the device is disconnected it is cleared
   List<int> get lastValue {
     String key = "$serviceUuid:$characteristicUuid:$descriptorUuid";
     return FlutterBluePlus._lastDescs[remoteId]?[key] ?? [];
@@ -71,14 +72,12 @@ class BluetoothDescriptor {
     // check connected
     if (device.isConnected == false) {
       throw FlutterBluePlusException(
-          ErrorPlatform.dart, "readDescriptor", FbpErrorCode.deviceIsDisconnected.index, "device is not connected");
+          ErrorPlatform.fbp, "readDescriptor", FbpErrorCode.deviceIsDisconnected.index, "device is not connected");
     }
 
-    // Only allow a single read to be underway at any time, per-characteristic, per-device.
-    // Otherwise, there would be multiple in-flight requests and we wouldn't know which response is for us.
-    String key = remoteId.str + ":" + characteristicUuid.toString() + ":readDesc";
-    _Mutex readMutex = await _MutexFactory.getMutexForKey(key);
-    await readMutex.take();
+    // Only allow a single ble operation to be underway at a time
+    _Mutex mtx = _MutexFactory.getMutexForKey("global");
+    await mtx.take();
 
     // return value
     List<int> readValue = [];
@@ -120,7 +119,7 @@ class BluetoothDescriptor {
 
       readValue = response.value;
     } finally {
-      readMutex.give();
+      mtx.give();
     }
 
     return readValue;
@@ -131,14 +130,12 @@ class BluetoothDescriptor {
     // check connected
     if (device.isConnected == false) {
       throw FlutterBluePlusException(
-          ErrorPlatform.dart, "writeDescriptor", FbpErrorCode.deviceIsDisconnected.index, "device is not connected");
+          ErrorPlatform.fbp, "writeDescriptor", FbpErrorCode.deviceIsDisconnected.index, "device is not connected");
     }
 
-    // Only allow a single write to be underway at any time, per-characteristic, per-device.
-    // Otherwise, there would be multiple in-flight requests and we wouldn't know which response is for us.
-    String key = remoteId.str + ":" + characteristicUuid.toString() + ":writeDesc";
-    _Mutex writeMutex = await _MutexFactory.getMutexForKey(key);
-    await writeMutex.take();
+    // Only allow a single ble operation to be underway at a time
+    _Mutex mtx = _MutexFactory.getMutexForKey("global");
+    await mtx.take();
 
     try {
       var request = BmWriteDescriptorRequest(
@@ -176,7 +173,7 @@ class BluetoothDescriptor {
         throw FlutterBluePlusException(_nativeError, "writeDescriptor", response.errorCode, response.errorString);
       }
     } finally {
-      writeMutex.give();
+      mtx.give();
     }
 
     return Future.value();
