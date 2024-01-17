@@ -56,6 +56,12 @@ class FlutterBluePlus {
 
   /// Checks whether the hardware supports Bluetooth
   static Future<bool> get isSupported async => await _invokeMethod('isSupported');
+  /// Checks whether the device supports BLE Extended Advertising feature
+  static Future<bool> get isLeExtendedAdvertisingSupported async => await _invokeMethod('isLeExtendedAdvertisingSupported');
+
+  /// Return the maximum LE advertising data length in bytes
+  static Future<int> get getLeMaximumAdvertisingDataLength async => await _invokeMethod('getLeMaximumAdvertisingDataLength');
+
 
   /// Return the friendly Bluetooth name of the local Bluetooth adapter
   static Future<String> get adapterName async => await _invokeMethod('getAdapterName');
