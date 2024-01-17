@@ -365,17 +365,6 @@ public class FlutterBluePlusPlugin implements
                     break;
                 }
 
-                case "isLeExtendedAdvertisingSupported": {
-                    result.success(mBluetoothAdapter.isLeExtendedAdvertisingSupported());
-                    break;
-                }
-
-                case "getLeMaximumAdvertisingDataLength": {
-                    int getLeMaximumAdvertisingDataLength = mBluetoothAdapter.getLeMaximumAdvertisingDataLength();
-                    result.success(getLeMaximumAdvertisingDataLength);
-                    break;
-                }
-
                 case "getAdapterState":
                 {
                     // get adapterState, if we have permission
@@ -2317,10 +2306,6 @@ public class FlutterBluePlusPlugin implements
                 int key = manufData.keyAt(i);
                 byte[] value = manufData.valueAt(i);
                 manufDataB.put(key, bytesToHex(value));
-            }
-            if(manufData.size() > 0){
-                int key = manufData.keyAt(0);
-                manufDataB.put(key + 1, bytesToHex(adv.getBytes()));
             }
         }
 
